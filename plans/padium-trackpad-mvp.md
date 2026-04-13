@@ -3,7 +3,11 @@
 **Objective:** Build a private macOS menubar app mapping trackpad gestures → keyboard shortcuts. 12-slot MVP (3/4-finger × tap 1x/2x + swipe 4-dir). Share binary to ~5 friends.
 
 **Repo:** https://github.com/dtateks/padium (private)
-**Stack:** Swift 6 + SwiftUI `MenuBarExtra` + `OpenMultitouchSupport` (SPM, MIT)
+**Stack:** Swift 6 + SwiftUI `MenuBarExtra`
+**Dependencies (2 only, per search-first):**
+- `OpenMultitouchSupport` v3.0.3+ (Kyome22, MIT) — gesture capture
+- `KeyboardShortcuts` (sindresorhus, MIT) — ships `Recorder` SwiftUI view, saves ~40% of Step 9
+**Reference (study, don't fork):** https://github.com/NullPointerDepressiveDisorder/MiddleDrag — same CGEventTap preemption pattern
 **Min macOS:** 14 Sonoma
 **Target metrics:** <20MB RAM idle, <50ms p95 latency, <2MB binary
 **Timeline:** 2 weeks calendar (Phase 0 = 2 days, Phases 1-8 = ~8-10 working days)
@@ -170,11 +174,12 @@
 
 **Goal:** Determine if `CGEventTap` có thể suppress macOS native 3-finger Mission Control / 4-finger Spaces trước khi trigger.
 
-**Cold-start brief:** Critic flag: hard problem riêng, không phải OMS. Nếu không suppress được → MVP scope phải re-scope (drop 3-finger swipes hoặc require user tắt System Settings).
+**Cold-start brief:** Critic flag: hard problem riêng, không phải OMS. Nếu không suppress được → MVP scope phải re-scope (drop 3-finger swipes hoặc require user tắt System Settings). **Reference implementation:** https://github.com/NullPointerDepressiveDisorder/MiddleDrag — đọc `MultiFingerGestureDetector.swift` + event tap setup trước khi code.
 
 **Tasks:**
 1. Branch `spike/phase-0c-preemption`
-2. Set up `CGEventTap` ở `.cghidEventTap` level với mask bao gồm gesture events
+2. **Read MiddleDrag source first** (30 min) — note approach + any gotchas they documented
+3. Set up `CGEventTap` ở `.cghidEventTap` level với mask bao gồm gesture events
 3. Experiment — khi nhận được gesture event (3-finger swipe up):
    - Approach A: return `NULL` từ tap callback (attempt suppress)
    - Approach B: return event nhưng modify phase
@@ -258,19 +263,18 @@
 
 ## Step 7: Config store
 
-**Goal:** Load/save config ở `~/.padium/config.json`, atomic write, default empty.
+**Goal:** Export/import config JSON ở `~/.padium/config.json` — KeyboardShortcuts quản primary binding state trong UserDefaults.
 
-**Cold-start brief:** Persistence layer. Independent — parallel với Step 5/6/8.
+**Cold-start brief:** Split responsibility: `KeyboardShortcuts` lib quản runtime bindings (UserDefaults-backed). JSON file là export/import path cho sharing giữa friends. Persistence layer simpler hơn plan cũ.
 
 **Tasks:**
 1. Branch `feat/step-7-config-store`
 2. Tạo `Sources/Config/`:
-   - `Config.swift` — `struct Config: Codable { var slots: [GestureSlot: Shortcut] }`
-   - `GestureSlot.swift` — enum matching 12 MVP slots
-   - `ConfigStore.swift` — load/save/default với `FileManager` + atomic write via tmp file + rename
+   - `GestureSlot.swift` — enum matching 12 MVP slots, map tới `KeyboardShortcuts.Name`
+   - `ConfigExporter.swift` — read all 12 `KeyboardShortcuts.getShortcut(for:)` → serialize Codable → atomic write to `~/.padium/config.json`
+   - `ConfigImporter.swift` — read JSON → `KeyboardShortcuts.setShortcut(_, for:)` for each slot
 3. Path: `~/.padium/config.json` (create dir if missing)
-4. Optional (if time): `FileWatcher` với `DispatchSource.makeFileSystemObjectSource` cho hot-reload
-5. Unit tests: round-trip, atomic write semantics, default config shape
+4. Unit tests: round-trip (export → import → export), atomic write semantics
 
 **Verification:**
 - Edit JSON trực tiếp → restart app → config giữ nguyên
@@ -317,19 +321,20 @@
 
 ## Step 9: Matrix config UI
 
-**Goal:** SwiftUI 2×6 grid, mỗi cell là shortcut recorder.
+**Goal:** SwiftUI 2×6 grid, mỗi cell dùng `KeyboardShortcuts.Recorder`.
 
-**Cold-start brief:** Owner chọn minimalist UI. Single window, matrix layout, shortcut capture field per cell. Depends on Step 7 (config) + Step 8 (window presenter).
+**Cold-start brief:** Owner chọn minimalist UI. Single window, matrix layout. **ADOPT `sindresorhus/KeyboardShortcuts`** — ships `Recorder` view drop-in (per search-first). Depends on Step 7 (config) + Step 8 (window presenter).
 
 **Tasks:**
 1. Branch `feat/step-9-matrix-ui`
-2. Tạo `Sources/UI/MatrixConfigView.swift`:
+2. Add SPM dep `KeyboardShortcuts` nếu chưa add
+3. Define 12 `KeyboardShortcuts.Name` static properties (one per gesture slot). `KeyboardShortcuts` tự quản persistence trong UserDefaults — **conflict với Step 7 JSON config** → decision: dùng KeyboardShortcuts cho mapping persistence, `~/.padium/config.json` chỉ để export/import (human-editable view). Revisit nếu approach này không fit.
+4. Tạo `Sources/UI/MatrixConfigView.swift`:
    - Grid 2 rows (3-finger, 4-finger) × 6 cols (tap1x, tap2x, swipe↑↓←→)
-   - Mỗi cell: `ShortcutRecorderField` component — click để record, show captured shortcut, "Clear" button
-3. `ShortcutRecorderField` — capture next `NSEvent.keyDown` with modifiers, convert to `Shortcut`, update config
-4. "Save" button → write config via Step 7, trigger reload
-5. Window: fixed size ~600×300, resizable off, close button only
-6. Light/dark mode support (free from SwiftUI)
+   - Mỗi cell: `KeyboardShortcuts.Recorder("", name: .slot3FingerTap1)`
+5. "Export JSON" button → serialize all 12 bindings to `~/.padium/config.json`
+6. Window: fixed size ~600×300, resizable off, close button only
+7. Light/dark mode support (free from SwiftUI)
 
 **Verification:**
 - Gán 1 slot qua UI → config.json updated → restart → setting giữ nguyên
