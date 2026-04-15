@@ -26,9 +26,21 @@ struct SettingsView: View {
         Form {
             if let notice = appState.systemGestureNotice {
                 Section {
-                    Label(notice, systemImage: "exclamationmark.triangle.fill")
-                        .foregroundStyle(.orange)
+                    VStack(alignment: .leading, spacing: 6) {
+                        Label(notice, systemImage: "exclamationmark.triangle.fill")
+                            .foregroundStyle(.orange)
+                            .font(.callout)
+
+                        HStack {
+                            Button("Open Trackpad Settings") {
+                                appState.openTrackpadSettings()
+                            }
+                            Button("Refresh") {
+                                appState.refreshSystemGestureConflicts()
+                            }
+                        }
                         .font(.callout)
+                    }
                 }
             }
 
@@ -53,7 +65,10 @@ struct SettingsView: View {
             ForEach(sections, id: \.title) { section in
                 Section(section.title) {
                     ForEach(section.slots, id: \.self) { slot in
-                        GestureRowView(slot: slot)
+                        GestureRowView(
+                            slot: slot,
+                            isConflicting: appState.conflictingSlots.contains(slot)
+                        )
                     }
                 }
             }
