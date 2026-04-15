@@ -6,6 +6,7 @@ enum GestureSensitivitySetting {
     static let maximumValue: Double = 1.0
 
     private static let userDefaultsKey = "gesture.sensitivity"
+    private static let baseSensitivityBoost: Double = 0.2
     private static let minimumSwipeThreshold: Float = 0.06
     private static let maximumSwipeThreshold: Float = 0.14
 
@@ -23,9 +24,13 @@ enum GestureSensitivitySetting {
     }
 
     static func swipeThreshold(for sensitivity: Double) -> Float {
-        let progress = Float(clamp(sensitivity))
+        let progress = Float(effectiveSensitivity(for: sensitivity))
         let range = maximumSwipeThreshold - minimumSwipeThreshold
         return maximumSwipeThreshold - (range * progress)
+    }
+
+    static func effectiveSensitivity(for sensitivity: Double) -> Double {
+        clamp(clamp(sensitivity) + baseSensitivityBoost)
     }
 
     static func currentSwipeThreshold(userDefaults: UserDefaults = .standard) -> Float {
@@ -43,8 +48,12 @@ enum GestureSensitivitySetting {
 // operate in physical-proportional space.
 struct GestureClassifier: Sendable {
 
+    private let swipeThresholdProvider: @Sendable () -> Float
+
     // Minimum normalized distance to register as a swipe.
-    private let swipeThreshold: Float
+    private var swipeThreshold: Float {
+        swipeThresholdProvider()
+    }
 
     // Trackpad aspect ratio (width / height). OMS normalizes each axis to [0,1]
     // independently, so horizontal displacement is underrepresented by this factor.
@@ -64,8 +73,16 @@ struct GestureClassifier: Sendable {
     // Contacts with a major ellipse axis above this are likely a palm.
     private static let palmMajorAxisThreshold: Float = 30.0
 
-    init(swipeThreshold: Float = GestureSensitivitySetting.currentSwipeThreshold()) {
-        self.swipeThreshold = swipeThreshold
+    init() {
+        self.swipeThresholdProvider = { GestureSensitivitySetting.currentSwipeThreshold() }
+    }
+
+    init(swipeThreshold: Float) {
+        self.swipeThresholdProvider = { swipeThreshold }
+    }
+
+    init(swipeThresholdProvider: @escaping @Sendable () -> Float) {
+        self.swipeThresholdProvider = swipeThresholdProvider
     }
 
     /// Try to classify incrementally: given first stable frame and current frame,

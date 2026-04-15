@@ -5,6 +5,14 @@ struct GestureClassifierTests {
 
     private let testSwipeThreshold: Float = 0.10
 
+    final class ThresholdBox: @unchecked Sendable {
+        var value: Float
+
+        init(_ value: Float) {
+            self.value = value
+        }
+    }
+
     private func pt(
         id: Int = 1, x: Float = 0.5, y: Float = 0.5,
         state: OMSTouchState = .touching, total: Float = 0.15, majorAxis: Float = 12.0
@@ -64,14 +72,43 @@ struct GestureClassifierTests {
         #expect(classify(fingers: 3, startX: 0.5, startY: 0.5, endX: 0.53, endY: 0.5) == nil)
     }
 
-    @Test func defaultSensitivityKeepsEmpiricalSwipeThreshold() {
-        #expect(GestureSensitivitySetting.swipeThreshold(for: GestureSensitivitySetting.defaultValue) == 0.10)
+    @Test func defaultSensitivityMapsToPreviousSeventyPercentThreshold() {
+        let midpointThreshold = GestureSensitivitySetting.swipeThreshold(for: GestureSensitivitySetting.defaultValue)
+        let previousSeventyPercentThreshold: Float = 0.084
+
+        #expect(abs(midpointThreshold - previousSeventyPercentThreshold) < 0.0001)
+    }
+
+    @Test func midpointSensitivityAppliesBaseBoostBeforeThresholdMapping() {
+        #expect(abs(GestureSensitivitySetting.effectiveSensitivity(for: 0.5) - 0.7) < 0.0001)
+    }
+
+    @Test func lowSensitivityClampsBeforeApplyingBaseBoost() {
+        #expect(abs(GestureSensitivitySetting.effectiveSensitivity(for: -0.5) - 0.2) < 0.0001)
+    }
+
+    @Test func highSensitivitySaturatesAtMaximumThresholdAfterBoost() {
+        #expect(abs(GestureSensitivitySetting.effectiveSensitivity(for: 0.9) - 1.0) < 0.0001)
+        #expect(abs(GestureSensitivitySetting.swipeThreshold(for: 0.9) - 0.06) < 0.0001)
     }
 
     @Test func higherSensitivityLowersSwipeThreshold() {
         let lowSensitivity = GestureSensitivitySetting.swipeThreshold(for: 0.2)
         let highSensitivity = GestureSensitivitySetting.swipeThreshold(for: 0.8)
         #expect(highSensitivity < lowSensitivity)
+    }
+
+    @Test func liveSensitivityUpdatesApplyWithoutRecreatingClassifier() {
+        let liveThreshold = ThresholdBox(0.12)
+        let classifier = GestureClassifier(swipeThresholdProvider: { liveThreshold.value })
+        let first = frame(3, x: 0.50, y: 0.50)
+        let last = frame(3, x: 0.57, y: 0.50)
+
+        #expect(classifier.classifyIncremental(firstFrame: first, currentFrame: last, peakFingerCount: 3) == nil)
+
+        liveThreshold.value = 0.08
+
+        #expect(classifier.classifyIncremental(firstFrame: first, currentFrame: last, peakFingerCount: 3)?.slot == .threeFingerSwipeRight)
     }
 
     @Test func rejectsMovementBelowEmpiricalSwipeThreshold() {
