@@ -26,8 +26,7 @@ Package.resolved
 *.profraw
 *.profdata
 
-# Artifacts & plans (agent working docs)
-artifacts/
+# Plans (scratch working docs)
 plans/
 
 # Environment

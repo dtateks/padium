@@ -1,0 +1,517 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 56;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		AA0101010101 /* PadiumApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0201010101 /* PadiumApp.swift */; };
+		AA0101010102 /* AppState.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0201010102 /* AppState.swift */; };
+		AA0101010103 /* GestureSlot.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0201010103 /* GestureSlot.swift */; };
+		AA0101010104 /* GestureEvent.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0201010104 /* GestureEvent.swift */; };
+		AA0101010105 /* GestureSource.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0201010105 /* GestureSource.swift */; };
+		AA0101010106 /* OMSGestureSource.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0201010106 /* OMSGestureSource.swift */; };
+		AA0101010107 /* GestureClassifier.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0201010107 /* GestureClassifier.swift */; };
+		AA0101010108 /* GestureEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0201010108 /* GestureEngine.swift */; };
+		AA0101010109 /* ShortcutRegistry.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0201010109 /* ShortcutRegistry.swift */; };
+		AA010101010A /* ShortcutEmitter.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA020101010A /* ShortcutEmitter.swift */; };
+		AA010101010B /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA020101010B /* SettingsView.swift */; };
+		AA010101010C /* GestureRowView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA020101010C /* GestureRowView.swift */; };
+		AA010101010D /* PermissionCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA020101010D /* PermissionCoordinator.swift */; };
+		AA010101010E /* PermissionsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA020101010E /* PermissionsView.swift */; };
+		AA010101010F /* PreemptionController.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA020101010F /* PreemptionController.swift */; };
+		AA0101010110 /* Logger.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0201010110 /* Logger.swift */; };
+		AA0101020201 /* GestureClassifierTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0301020201 /* GestureClassifierTests.swift */; };
+		AA0101020202 /* GestureEngineTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0301020202 /* GestureEngineTests.swift */; };
+		AA0101020203 /* ShortcutRegistryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0301020203 /* ShortcutRegistryTests.swift */; };
+		AA0101020204 /* ShortcutEmitterTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0301020204 /* ShortcutEmitterTests.swift */; };
+		AA0101020205 /* PermissionCoordinatorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0301020205 /* PermissionCoordinatorTests.swift */; };
+		AA0101030301 /* OpenMultitouchSupport in Frameworks */ = {isa = PBXBuildFile; productRef = AA0701030301 /* OpenMultitouchSupport */; };
+		AA0101030302 /* KeyboardShortcuts in Frameworks */ = {isa = PBXBuildFile; productRef = AA0701030302 /* KeyboardShortcuts */; };
+		AA0101030303 /* KeyboardShortcuts in Frameworks */ = {isa = PBXBuildFile; productRef = AA0701030303 /* KeyboardShortcuts */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXFileReference section */
+		AA0201010101 /* PadiumApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PadiumApp.swift; sourceTree = "<group>"; };
+		AA0201010102 /* AppState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppState.swift; sourceTree = "<group>"; };
+		AA0201010103 /* GestureSlot.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GestureSlot.swift; sourceTree = "<group>"; };
+		AA0201010104 /* GestureEvent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GestureEvent.swift; sourceTree = "<group>"; };
+		AA0201010105 /* GestureSource.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GestureSource.swift; sourceTree = "<group>"; };
+		AA0201010106 /* OMSGestureSource.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OMSGestureSource.swift; sourceTree = "<group>"; };
+		AA0201010107 /* GestureClassifier.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GestureClassifier.swift; sourceTree = "<group>"; };
+		AA0201010108 /* GestureEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GestureEngine.swift; sourceTree = "<group>"; };
+		AA0201010109 /* ShortcutRegistry.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShortcutRegistry.swift; sourceTree = "<group>"; };
+		AA020101010A /* ShortcutEmitter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShortcutEmitter.swift; sourceTree = "<group>"; };
+		AA020101010B /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
+		AA020101010C /* GestureRowView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GestureRowView.swift; sourceTree = "<group>"; };
+		AA020101010D /* PermissionCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PermissionCoordinator.swift; sourceTree = "<group>"; };
+		AA020101010E /* PermissionsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PermissionsView.swift; sourceTree = "<group>"; };
+		AA020101010F /* PreemptionController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PreemptionController.swift; sourceTree = "<group>"; };
+		AA0201010110 /* Logger.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Logger.swift; sourceTree = "<group>"; };
+		AA0201010111 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		AA0301020201 /* GestureClassifierTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GestureClassifierTests.swift; sourceTree = "<group>"; };
+		AA0301020202 /* GestureEngineTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GestureEngineTests.swift; sourceTree = "<group>"; };
+		AA0301020203 /* ShortcutRegistryTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShortcutRegistryTests.swift; sourceTree = "<group>"; };
+		AA0301020204 /* ShortcutEmitterTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShortcutEmitterTests.swift; sourceTree = "<group>"; };
+		AA0301020205 /* PermissionCoordinatorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PermissionCoordinatorTests.swift; sourceTree = "<group>"; };
+		AA0401010101 /* Padium.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Padium.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		AA0402020202 /* PadiumTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = PadiumTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+/* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		AA0501010101 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				AA0101030301 /* OpenMultitouchSupport in Frameworks */,
+				AA0101030302 /* KeyboardShortcuts in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		AA0502020202 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				AA0101030303 /* KeyboardShortcuts in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		AA0600000000 /* root */ = {
+			isa = PBXGroup;
+			children = (
+				AA0601010101 /* Padium */,
+				AA0602020202 /* PadiumTests */,
+				AA0603030303 /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		AA0601010101 /* Padium */ = {
+			isa = PBXGroup;
+			children = (
+				AA0201010101 /* PadiumApp.swift */,
+				AA0201010102 /* AppState.swift */,
+				AA0201010103 /* GestureSlot.swift */,
+				AA0201010104 /* GestureEvent.swift */,
+				AA0201010105 /* GestureSource.swift */,
+				AA0201010106 /* OMSGestureSource.swift */,
+				AA0201010107 /* GestureClassifier.swift */,
+				AA0201010108 /* GestureEngine.swift */,
+				AA0201010109 /* ShortcutRegistry.swift */,
+				AA020101010A /* ShortcutEmitter.swift */,
+				AA020101010B /* SettingsView.swift */,
+				AA020101010C /* GestureRowView.swift */,
+				AA020101010D /* PermissionCoordinator.swift */,
+				AA020101010E /* PermissionsView.swift */,
+				AA020101010F /* PreemptionController.swift */,
+				AA0201010110 /* Logger.swift */,
+				AA0201010111 /* Info.plist */,
+			);
+			path = Padium;
+			sourceTree = "<group>";
+		};
+		AA0602020202 /* PadiumTests */ = {
+			isa = PBXGroup;
+			children = (
+				AA0301020201 /* GestureClassifierTests.swift */,
+				AA0301020202 /* GestureEngineTests.swift */,
+				AA0301020203 /* ShortcutRegistryTests.swift */,
+				AA0301020204 /* ShortcutEmitterTests.swift */,
+				AA0301020205 /* PermissionCoordinatorTests.swift */,
+			);
+			path = PadiumTests;
+			sourceTree = "<group>";
+		};
+		AA0603030303 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				AA0401010101 /* Padium.app */,
+				AA0402020202 /* PadiumTests.xctest */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		AA0801010101 /* Padium */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = AA0910101010 /* Build configuration list for PBXNativeTarget "Padium" */;
+			buildPhases = (
+				AA0A01010101 /* Sources */,
+				AA0501010101 /* Frameworks */,
+				AA0A01010103 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = Padium;
+			packageProductDependencies = (
+				AA0701030301 /* OpenMultitouchSupport */,
+				AA0701030302 /* KeyboardShortcuts */,
+			);
+			productName = Padium;
+			productReference = AA0401010101 /* Padium.app */;
+			productType = "com.apple.product-type.application";
+		};
+		AA0802020202 /* PadiumTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = AA0920202020 /* Build configuration list for PBXNativeTarget "PadiumTests" */;
+			buildPhases = (
+				AA0A02020202 /* Sources */,
+				AA0502020202 /* Frameworks */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				AA0B01010101 /* PBXTargetDependency */,
+			);
+			name = PadiumTests;
+			packageProductDependencies = (
+				AA0701030303 /* KeyboardShortcuts */,
+			);
+			productName = PadiumTests;
+			productReference = AA0402020202 /* PadiumTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		AA0C00000000 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = 1;
+				LastSwiftUpdateCheck = 1600;
+				LastUpgradeCheck = 1600;
+				TargetAttributes = {
+					AA0801010101 = {
+						CreatedOnToolsVersion = 16.0;
+					};
+					AA0802020202 = {
+						CreatedOnToolsVersion = 16.0;
+						TestTargetID = AA0801010101;
+					};
+				};
+			};
+			buildConfigurationList = AA0930303030 /* Build configuration list for PBXProject "Padium" */;
+			compatibilityVersion = "Xcode 14.0";
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				en,
+				Base,
+			);
+			mainGroup = AA0600000000;
+			packageReferences = (
+				AA0D01010101 /* XCRemoteSwiftPackageReference "OpenMultitouchSupport" */,
+				AA0D02020202 /* XCRemoteSwiftPackageReference "KeyboardShortcuts" */,
+			);
+			productRefGroup = AA0603030303 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				AA0801010101 /* Padium */,
+				AA0802020202 /* PadiumTests */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		AA0A01010103 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		AA0A01010101 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				AA0101010101 /* PadiumApp.swift in Sources */,
+				AA0101010102 /* AppState.swift in Sources */,
+				AA0101010103 /* GestureSlot.swift in Sources */,
+				AA0101010104 /* GestureEvent.swift in Sources */,
+				AA0101010105 /* GestureSource.swift in Sources */,
+				AA0101010106 /* OMSGestureSource.swift in Sources */,
+				AA0101010107 /* GestureClassifier.swift in Sources */,
+				AA0101010108 /* GestureEngine.swift in Sources */,
+				AA0101010109 /* ShortcutRegistry.swift in Sources */,
+				AA010101010A /* ShortcutEmitter.swift in Sources */,
+				AA010101010B /* SettingsView.swift in Sources */,
+				AA010101010C /* GestureRowView.swift in Sources */,
+				AA010101010D /* PermissionCoordinator.swift in Sources */,
+				AA010101010E /* PermissionsView.swift in Sources */,
+				AA010101010F /* PreemptionController.swift in Sources */,
+				AA0101010110 /* Logger.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		AA0A02020202 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				AA0101020201 /* GestureClassifierTests.swift in Sources */,
+				AA0101020202 /* GestureEngineTests.swift in Sources */,
+				AA0101020203 /* ShortcutRegistryTests.swift in Sources */,
+				AA0101020204 /* ShortcutEmitterTests.swift in Sources */,
+				AA0101020205 /* PermissionCoordinatorTests.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		AA0B01010101 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = AA0801010101 /* Padium */;
+			targetProxy = AA0B02020202 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
+
+/* Begin PBXContainerItemProxy section */
+		AA0B02020202 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = AA0C00000000 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = AA0801010101;
+			remoteInfo = Padium;
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin XCBuildConfiguration section */
+		AA0911111111 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_STYLE = Automatic;
+				COMBINE_HIDPI_IMAGES = YES;
+				CURRENT_PROJECT_VERSION = 1;
+				DEAD_CODE_STRIPPING = YES;
+				ENABLE_APP_SANDBOX = NO;
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = Padium/Info.plist;
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				MARKETING_VERSION = 0.1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.padium;
+				PRODUCT_NAME = Padium;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_STRICT_CONCURRENCY = complete;
+				SWIFT_VERSION = 6.0;
+			};
+			name = Debug;
+		};
+		AA0912121212 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_STYLE = Automatic;
+				COMBINE_HIDPI_IMAGES = YES;
+				CURRENT_PROJECT_VERSION = 1;
+				DEAD_CODE_STRIPPING = YES;
+				ENABLE_APP_SANDBOX = NO;
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = Padium/Info.plist;
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				MARKETING_VERSION = 0.1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.padium;
+				PRODUCT_NAME = Padium;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_STRICT_CONCURRENCY = complete;
+				SWIFT_VERSION = 6.0;
+			};
+			name = Release;
+		};
+		AA0913131313 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				GENERATE_INFOPLIST_FILE = YES;
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.padium.tests;
+				PRODUCT_NAME = PadiumTests;
+				SWIFT_STRICT_CONCURRENCY = complete;
+				SWIFT_VERSION = 6.0;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Padium.app/Contents/MacOS/Padium";
+			};
+			name = Debug;
+		};
+		AA0914141414 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				GENERATE_INFOPLIST_FILE = YES;
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.padium.tests;
+				PRODUCT_NAME = PadiumTests;
+				SWIFT_STRICT_CONCURRENCY = complete;
+				SWIFT_VERSION = 6.0;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Padium.app/Contents/MacOS/Padium";
+			};
+			name = Release;
+		};
+		AA0915151515 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				ENABLE_TESTABILITY = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"DEBUG=1",
+					"$(inherited)",
+				);
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				MTL_FAST_MATH = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				SDKROOT = macosx;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				SWIFT_VERSION = 6.0;
+			};
+			name = Debug;
+		};
+		AA0916161616 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				ENABLE_NS_ASSERTIONS = NO;
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				MTL_FAST_MATH = YES;
+				SDKROOT = macosx;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+				SWIFT_VERSION = 6.0;
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		AA0910101010 /* Build configuration list for PBXNativeTarget "Padium" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				AA0911111111 /* Debug */,
+				AA0912121212 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		AA0920202020 /* Build configuration list for PBXNativeTarget "PadiumTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				AA0913131313 /* Debug */,
+				AA0914141414 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		AA0930303030 /* Build configuration list for PBXProject "Padium" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				AA0915151515 /* Debug */,
+				AA0916161616 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+/* End XCConfigurationList section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		AA0D01010101 /* XCRemoteSwiftPackageReference "OpenMultitouchSupport" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/Kyome22/OpenMultitouchSupport";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 3.0.3;
+			};
+		};
+		AA0D02020202 /* XCRemoteSwiftPackageReference "KeyboardShortcuts" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/sindresorhus/KeyboardShortcuts";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 2.4.0;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		AA0701030301 /* OpenMultitouchSupport */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = AA0D01010101 /* XCRemoteSwiftPackageReference "OpenMultitouchSupport" */;
+			productName = OpenMultitouchSupport;
+		};
+		AA0701030302 /* KeyboardShortcuts */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = AA0D02020202 /* XCRemoteSwiftPackageReference "KeyboardShortcuts" */;
+			productName = KeyboardShortcuts;
+		};
+		AA0701030303 /* KeyboardShortcuts */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = AA0D02020202 /* XCRemoteSwiftPackageReference "KeyboardShortcuts" */;
+			productName = KeyboardShortcuts;
+		};
+/* End XCSwiftPackageProductDependency section */
+
+	};
+	rootObject = AA0C00000000 /* Project object */;
+}
