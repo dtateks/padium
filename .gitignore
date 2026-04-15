@@ -1,33 +1,35 @@
-# macOS
-.DS_Store
-.AppleDouble
-.LSOverride
-
 # Xcode
 build/
 DerivedData/
-*.xcuserstate
+*.xcuserdata
+xcuserdata/
 *.xcworkspace/xcuserdata/
-*.xcodeproj/xcuserdata/
-*.xcodeproj/project.xcworkspace/xcuserdata/
+*.pbxuser
+*.mode1v3
+*.mode2v3
+*.perspectivev3
+*.xccheckout
+*.moved-aside
 
 # Swift Package Manager
 .build/
-.swiftpm/
+Packages/
+Package.pins
 Package.resolved
 
-# Dependencies
-Pods/
+# macOS
+.DS_Store
+*.swp
+*~
 
-# Archives
-*.xcarchive
-*.app.dSYM.zip
-*.ipa
+# Profiling
+*.profraw
+*.profdata
 
-# Local config
-*.local.json
+# Artifacts & plans (agent working docs)
+artifacts/
+plans/
+
+# Environment
 .env
-
-# IDE
-.vscode/
-.idea/
+.env.*
