@@ -75,10 +75,14 @@ struct GestureClassifierTests {
     }
 
     @Test func rejectsMovementBelowEmpiricalSwipeThreshold() {
-        #expect(classify(fingers: 3, startX: 0.5, startY: 0.5, endX: 0.59, endY: 0.5) == nil)
+        // dx=0.05, after aspect ratio compensation: 0.05 * 1.5 = 0.075 < threshold 0.10
+        #expect(classify(fingers: 3, startX: 0.5, startY: 0.5, endX: 0.55, endY: 0.5) == nil)
     }
 
     @Test func rejectsAmbiguousDiagonalMovement() {
+        // After aspect ratio compensation, dx and dy should still be ambiguous.
+        // raw dx=0.06 → scaled 0.09, dy=0.09 → dominance: 0.09 < 0.09*1.2=0.108 (no horizontal)
+        //                                                   0.09 < 0.09*1.2=0.108 (no vertical)
         let c = makeClassifier()
         let first = [
             pt(id: 1, x: 0.20, y: 0.20),
@@ -86,9 +90,9 @@ struct GestureClassifierTests {
             pt(id: 3, x: 0.60, y: 0.20)
         ]
         let last = [
-            pt(id: 1, x: 0.29, y: 0.28),
-            pt(id: 2, x: 0.49, y: 0.29),
-            pt(id: 3, x: 0.69, y: 0.29)
+            pt(id: 1, x: 0.26, y: 0.29),
+            pt(id: 2, x: 0.46, y: 0.29),
+            pt(id: 3, x: 0.66, y: 0.29)
         ]
         #expect(c.classifyIncremental(firstFrame: first, currentFrame: last, peakFingerCount: 3) == nil)
     }
