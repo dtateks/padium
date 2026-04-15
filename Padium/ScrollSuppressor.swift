@@ -3,21 +3,43 @@ import Foundation
 
 /// Suppresses macOS scroll wheel events while 3+ finger multitouch is active.
 ///
-/// Uses a CGEventTap at `.cghidEventTap` to intercept `scrollWheel` events.
-/// When `isMultitouchActive` is true, scroll events (including subsequent momentum
-/// events) are consumed (returning nil) so they don't reach the active window.
+/// Uses a CGEventTap at `.cghidEventTap` to intercept `scrollWheel`,
+/// `leftMouseDown`, and `leftMouseUp` events. When `isMultitouchActive` is true,
+/// scroll events (including subsequent momentum events) are consumed so they don't
+/// reach the active window. Physical left clicks with 3+ fingers can also be
+/// converted to middle-click events when the 3-finger tap slot is configured for it.
 ///
 /// Thread-safety: `isMultitouchActive` is set from the OMS touch callback thread
 /// and read from the CGEventTap callback thread. Uses `os_unfair_lock` for safety.
 final class ScrollSuppressor: @unchecked Sendable {
 
+    enum EventDisposition {
+        case passThrough
+        case suppress
+        case replace(CGEvent)
+    }
+
     static let shared = ScrollSuppressor()
+    static let syntheticMiddleClickMarker: Int64 = 0x50414449554D
+
+    private enum LeftMouseState {
+        case idle
+        case suppressingOriginalPair
+        case convertingPair
+    }
+
+    private static let middleClickDedupWindow: TimeInterval = 0.5
+    private static let middleMouseButtonNumber = Int64(CGMouseButton.center.rawValue)
 
     // MARK: - Thread-safe multitouch flag
 
     private var _lock = os_unfair_lock()
     private var _multitouchActive = false
+    private var _currentFingerCount = 0
     private var _suppressMomentum = false
+    private var _leftMouseState: LeftMouseState = .idle
+    private var _lastTapMiddleClickAt: TimeInterval?
+    private var _lastPhysicalMiddleClickAt: TimeInterval?
 
     /// Set to `true` when 3+ fingers are actively touching the trackpad.
     /// Set to `false` when fingers lift.
@@ -43,6 +65,20 @@ final class ScrollSuppressor: @unchecked Sendable {
         }
     }
 
+    /// Set to the current number of touches observed on the trackpad.
+    var currentFingerCount: Int {
+        get {
+            os_unfair_lock_lock(&_lock)
+            defer { os_unfair_lock_unlock(&_lock) }
+            return _currentFingerCount
+        }
+        set {
+            os_unfair_lock_lock(&_lock)
+            _currentFingerCount = max(newValue, 0)
+            os_unfair_lock_unlock(&_lock)
+        }
+    }
+
     // MARK: - Event tap
 
     fileprivate var eventTap: CFMachPort?
@@ -52,7 +88,10 @@ final class ScrollSuppressor: @unchecked Sendable {
     func start() {
         guard eventTap == nil else { return }
 
-        let mask: CGEventMask = 1 << CGEventType.scrollWheel.rawValue
+        let mask: CGEventMask =
+            (1 << CGEventType.scrollWheel.rawValue) |
+            (1 << CGEventType.leftMouseDown.rawValue) |
+            (1 << CGEventType.leftMouseUp.rawValue)
 
         guard let tap = CGEvent.tapCreate(
             tap: .cghidEventTap,
@@ -109,10 +148,54 @@ final class ScrollSuppressor: @unchecked Sendable {
 
         os_unfair_lock_lock(&_lock)
         _multitouchActive = false
+        _currentFingerCount = 0
         _suppressMomentum = false
+        _leftMouseState = .idle
+        _lastTapMiddleClickAt = nil
+        _lastPhysicalMiddleClickAt = nil
         os_unfair_lock_unlock(&_lock)
 
         PadiumLogger.gesture.info("Scroll suppressor stopped")
+    }
+
+    @discardableResult
+    func registerGestureMiddleClickIfNeeded(at timestamp: Date) -> Bool {
+        let referenceTime = timestamp.timeIntervalSinceReferenceDate
+
+        os_unfair_lock_lock(&_lock)
+        defer { os_unfair_lock_unlock(&_lock) }
+
+        guard _leftMouseState == .idle else { return false }
+        guard !isWithinDedupWindow(at: referenceTime, since: _lastPhysicalMiddleClickAt) else {
+            return false
+        }
+
+        _lastTapMiddleClickAt = referenceTime
+        return true
+    }
+
+    func eventDisposition(for type: CGEventType, event: CGEvent) -> EventDisposition {
+        let isMiddleClickConfigured = GestureActionStore.actionKind(for: .threeFingerTap) == .middleClick
+        return eventDisposition(for: type, event: event, isMiddleClickConfigured: isMiddleClickConfigured)
+    }
+
+    func eventDisposition(
+        for type: CGEventType,
+        event: CGEvent,
+        isMiddleClickConfigured: Bool
+    ) -> EventDisposition {
+        switch type {
+        case .scrollWheel:
+            return shouldSuppress(event) ? .suppress : .passThrough
+        case .leftMouseDown, .leftMouseUp:
+            return leftMouseDisposition(
+                for: type,
+                event: event,
+                isMiddleClickConfigured: isMiddleClickConfigured
+            )
+        default:
+            return .passThrough
+        }
     }
 
     // MARK: - Internal suppression logic
@@ -158,6 +241,93 @@ final class ScrollSuppressor: @unchecked Sendable {
 
         return false
     }
+
+    fileprivate func leftMouseDisposition(
+        for type: CGEventType,
+        event: CGEvent,
+        isMiddleClickConfigured: Bool
+    ) -> EventDisposition {
+        if event.getIntegerValueField(.eventSourceUserData) == Self.syntheticMiddleClickMarker {
+            return .passThrough
+        }
+
+        let referenceTime = Date().timeIntervalSinceReferenceDate
+
+        os_unfair_lock_lock(&_lock)
+        defer { os_unfair_lock_unlock(&_lock) }
+
+        if type == .leftMouseUp {
+            switch _leftMouseState {
+            case .convertingPair:
+                guard let convertedEvent = Self.makeMiddleClickEvent(from: event, mouseType: .otherMouseUp) else {
+                    _leftMouseState = .idle
+                    PadiumLogger.gesture.error("Failed to convert physical click up to middle click")
+                    return .passThrough
+                }
+                _leftMouseState = .idle
+                _lastPhysicalMiddleClickAt = referenceTime
+                PadiumLogger.gesture.debug("TAP-DIAG: converting physical click up to middle click")
+                return .replace(convertedEvent)
+            case .suppressingOriginalPair:
+                _leftMouseState = .idle
+                PadiumLogger.gesture.debug("TAP-DIAG: suppressing duplicate physical click up after tap middle click")
+                return .suppress
+            case .idle:
+                break
+            }
+        }
+
+        guard type == .leftMouseDown,
+              isMiddleClickConfigured,
+              _currentFingerCount >= 3 else {
+            return .passThrough
+        }
+
+        if isWithinDedupWindow(at: referenceTime, since: _lastTapMiddleClickAt) {
+            _leftMouseState = .suppressingOriginalPair
+            PadiumLogger.gesture.debug("TAP-DIAG: suppressing duplicate physical click down after tap middle click")
+            return .suppress
+        }
+
+        guard let convertedEvent = Self.makeMiddleClickEvent(from: event, mouseType: .otherMouseDown) else {
+            PadiumLogger.gesture.error("Failed to convert physical click down to middle click")
+            return .passThrough
+        }
+
+        _leftMouseState = .convertingPair
+        _lastPhysicalMiddleClickAt = referenceTime
+        PadiumLogger.gesture.debug("TAP-DIAG: converting physical click down to middle click fc=\(self._currentFingerCount)")
+        return .replace(convertedEvent)
+    }
+
+    static func configureMiddleClickEvent(_ event: CGEvent, clickState: Int64) {
+        event.setIntegerValueField(.mouseEventButtonNumber, value: middleMouseButtonNumber)
+        event.setIntegerValueField(.mouseEventClickState, value: clickState)
+        event.setIntegerValueField(.eventSourceUserData, value: syntheticMiddleClickMarker)
+    }
+
+    private func isWithinDedupWindow(at referenceTime: TimeInterval, since priorTime: TimeInterval?) -> Bool {
+        guard let priorTime else { return false }
+        return referenceTime - priorTime <= Self.middleClickDedupWindow
+    }
+
+    private static func makeMiddleClickEvent(from event: CGEvent, mouseType: CGEventType) -> CGEvent? {
+        guard let source = CGEventSource(stateID: .hidSystemState),
+              let convertedEvent = CGEvent(
+                mouseEventSource: source,
+                mouseType: mouseType,
+                mouseCursorPosition: event.location,
+                mouseButton: .center
+              )
+        else {
+            return nil
+        }
+
+        convertedEvent.flags = event.flags
+        let clickState = max(event.getIntegerValueField(.mouseEventClickState), 1)
+        configureMiddleClickEvent(convertedEvent, clickState: clickState)
+        return convertedEvent
+    }
 }
 
 private func scrollTapCallback(
@@ -177,13 +347,12 @@ private func scrollTapCallback(
         return Unmanaged.passUnretained(event)
     }
 
-    guard type == .scrollWheel else {
+    switch suppressor.eventDisposition(for: type, event: event) {
+    case .passThrough:
         return Unmanaged.passUnretained(event)
+    case .suppress:
+        return nil
+    case .replace(let replacement):
+        return Unmanaged.passRetained(replacement)
     }
-
-    if suppressor.shouldSuppress(event) {
-        return nil // consume the scroll event
-    }
-
-    return Unmanaged.passUnretained(event)
 }

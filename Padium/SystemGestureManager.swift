@@ -40,8 +40,8 @@ final class SystemGestureManager {
 
     /// Disable only the system gestures that conflict with configured Padium slots.
     /// Saves original values first so they can be restored.
-    func suppress(conflictingSettings: [SystemGestureSetting]) {
-        let disabledPreferenceKeys = Self.disabledPreferenceKeys(for: conflictingSettings)
+    func suppress(conflictingSettings: [SystemGestureSetting], allSettings: [SystemGestureSetting]) {
+        let disabledPreferenceKeys = Self.disabledPreferenceKeys(for: conflictingSettings, allSettings: allSettings)
         guard !disabledPreferenceKeys.trackpadKeys.isEmpty || !disabledPreferenceKeys.dockKeys.isEmpty else {
             isSuppressed = false
             return
@@ -142,10 +142,26 @@ final class SystemGestureManager {
         task.waitUntilExit()
     }
 
-    static func disabledPreferenceKeys(for conflictingSettings: [SystemGestureSetting]) -> (trackpadKeys: Set<String>, dockKeys: Set<String>) {
+    static func disabledPreferenceKeys(
+        for conflictingSettings: [SystemGestureSetting],
+        allSettings: [SystemGestureSetting]
+    ) -> (trackpadKeys: Set<String>, dockKeys: Set<String>) {
         let trackpadKeys = Set(conflictingSettings.map(\.key))
-        let includesVerticalGesture = !trackpadKeys.isDisjoint(with: Self.verticalTrackpadKeys)
-        let dockKeys = includesVerticalGesture ? Set(Self.dockBoolKeys) : []
+
+        // Only disable Dock gesture keys (Mission Control / App Exposé) when ALL
+        // enabled vertical system gestures are being suppressed. The Dock keys are
+        // global — they control gestures for every finger count. If only one
+        // finger-count variant is configured in Padium, leave Dock keys alone so
+        // the other variant still triggers Mission Control / App Exposé.
+        let enabledVerticalKeys = Set(
+            allSettings
+                .filter { $0.isEnabled && verticalTrackpadKeys.contains($0.key) }
+                .map(\.key)
+        )
+        let allVerticalSuppressed = !enabledVerticalKeys.isEmpty
+            && enabledVerticalKeys.isSubset(of: trackpadKeys)
+        let dockKeys = allVerticalSuppressed ? Set(Self.dockBoolKeys) : []
+
         return (trackpadKeys, dockKeys)
     }
 }
