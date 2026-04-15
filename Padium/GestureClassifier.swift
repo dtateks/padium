@@ -6,9 +6,9 @@ enum GestureSensitivitySetting {
     static let maximumValue: Double = 1.0
 
     private static let userDefaultsKey = "gesture.sensitivity"
-    private static let baseSensitivityBoost: Double = 0.25
-    private static let minimumSwipeThreshold: Float = 0.06
-    private static let maximumSwipeThreshold: Float = 0.14
+    private static let baseSensitivityBoost: Double = 0.2
+    private static let minimumSwipeThreshold: Float = 0.04
+    private static let maximumSwipeThreshold: Float = 0.10
 
     static func clamp(_ value: Double) -> Double {
         min(max(value, minimumValue), maximumValue)
