@@ -1,5 +1,6 @@
 import ApplicationServices
 import Foundation
+import KeyboardShortcuts
 import os
 
 @MainActor
@@ -18,6 +19,26 @@ protocol ShortcutEmitting: AnyObject {
 extension GestureEngine: GestureRuntimeControlling {}
 extension ShortcutEmitter: ShortcutEmitting {}
 
+@MainActor
+protocol PreemptionControlling: AnyObject {
+    func currentPolicy(activeSlots: Set<GestureSlot>) -> PreemptionPolicy
+    func currentSystemGestureSettings() -> [SystemGestureSetting]
+    func conflictingSettings(for activeSlots: Set<GestureSlot>) -> [SystemGestureSetting]
+    func conflictingSlots(for activeSlots: Set<GestureSlot>) -> Set<GestureSlot>
+    func openTrackpadSettings()
+}
+
+@MainActor
+protocol SystemGestureManaging: AnyObject {
+    var isSuppressed: Bool { get }
+    func suppress(conflictingSettings: [SystemGestureSetting])
+    func restore()
+    func restoreIfNeeded()
+}
+
+extension PreemptionController: PreemptionControlling {}
+extension SystemGestureManager: SystemGestureManaging {}
+
 @MainActor @Observable
 final class AppState {
     var permissionState: PermissionState { coordinator.permissionState }
@@ -29,14 +50,16 @@ final class AppState {
     var isSettingsPresented: Bool = false
 
     private let coordinator: PermissionCoordinator
-    private let preemptionController: PreemptionController
+    private let preemptionController: any PreemptionControlling
+    private let systemGestureManager: any SystemGestureManaging
     private let gestureEngine: any GestureRuntimeControlling
     private let shortcutEmitter: any ShortcutEmitting
     private var runtimeTask: Task<Void, Never>?
 
     init(
         permissionChecker: PermissionChecking = SystemPermissionChecker(),
-        preemptionController: PreemptionController? = nil,
+        preemptionController: (any PreemptionControlling)? = nil,
+        systemGestureManager: (any SystemGestureManaging)? = nil,
         gestureEngine: (any GestureRuntimeControlling)? = nil,
         shortcutEmitter: (any ShortcutEmitting)? = nil
     ) {
@@ -44,12 +67,13 @@ final class AppState {
 
         let controller = preemptionController ?? PreemptionController()
         self.preemptionController = controller
-        let policy = controller.currentPolicy()
+        let policy = controller.currentPolicy(activeSlots: Set(GestureSlot.allCases))
         let supportedGestureSlots = Self.resolveSupportedGestureSlots(from: policy)
-        self.systemGestureNotice = policy.ownerNotice
-        self.conflictingSlots = controller.conflictingSlots()
         self.supportedGestureSlots = supportedGestureSlots
         self.gestureSensitivity = GestureSensitivitySetting.storedValue()
+        self.systemGestureManager = systemGestureManager ?? SystemGestureManager.shared
+        self.systemGestureNotice = nil
+        self.conflictingSlots = []
 
         if let gestureEngine {
             self.gestureEngine = gestureEngine
@@ -58,18 +82,20 @@ final class AppState {
         }
 
         self.shortcutEmitter = shortcutEmitter ?? ShortcutEmitter()
+        refreshSystemGestureConflicts()
     }
 
     /// Check permissions and auto-start runtime if granted. Also refreshes system gesture conflicts.
     func refreshPermissions() {
         coordinator.checkPermissions()
-        refreshSystemGestureConflicts()
 
         if coordinator.isFullyGranted {
             startRuntimeIfNeeded()
         } else {
             stopRuntime()
         }
+
+        refreshSystemGestureConflicts()
     }
 
     func requestAccessibility() {
@@ -77,9 +103,10 @@ final class AppState {
     }
 
     func refreshSystemGestureConflicts() {
-        let policy = preemptionController.currentPolicy()
+        let configuredSlots = configuredGestureSlots()
+        let policy = preemptionController.currentPolicy(activeSlots: configuredSlots)
         systemGestureNotice = policy.ownerNotice
-        conflictingSlots = preemptionController.conflictingSlots()
+        conflictingSlots = preemptionController.conflictingSlots(for: configuredSlots)
     }
 
     func openTrackpadSettings() {
@@ -87,12 +114,12 @@ final class AppState {
     }
 
     func systemGestureSettings() -> [SystemGestureSetting] {
-        preemptionController.currentSystemGestureSettings()
+        preemptionController.conflictingSettings(for: configuredGestureSlots())
     }
 
     func handleAppLaunch(onMissingPermissions: @escaping @MainActor () -> Void) {
         // If a previous session crashed without restoring system gestures, restore now.
-        SystemGestureManager.shared.restoreIfNeeded()
+        systemGestureManager.restoreIfNeeded()
 
         startPermissionPolling()
         refreshPermissions()
@@ -124,16 +151,12 @@ final class AppState {
         guard gestureSensitivity != clamped else { return }
         gestureSensitivity = clamped
         GestureSensitivitySetting.store(clamped)
-
-        if isRunning {
-            restartRuntime()
-        }
     }
 
     private func startRuntimeIfNeeded() {
         guard runtimeTask == nil else { return }
 
-        SystemGestureManager.shared.suppress()
+        applySystemGestureSuppression()
         ScrollSuppressor.shared.start()
 
         guard gestureEngine.start() else {
@@ -141,7 +164,7 @@ final class AppState {
                 PadiumLogger.gesture.error("Gesture engine failed to start: \(String(describing: startError), privacy: .public)")
             }
             ScrollSuppressor.shared.stop()
-            SystemGestureManager.shared.restore()
+            systemGestureManager.restore()
             return
         }
 
@@ -159,12 +182,34 @@ final class AppState {
         runtimeTask?.cancel()
         runtimeTask = nil
         ScrollSuppressor.shared.stop()
-        SystemGestureManager.shared.restore()
+        systemGestureManager.restore()
     }
 
-    private func restartRuntime() {
-        stopRuntime()
-        startRuntimeIfNeeded()
+    func handleShortcutConfigurationChange() {
+        if isRunning {
+            applySystemGestureSuppression()
+        }
+        refreshSystemGestureConflicts()
+    }
+
+    private func applySystemGestureSuppression() {
+        if systemGestureManager.isSuppressed {
+            systemGestureManager.restore()
+        }
+
+        let configuredSlots = configuredGestureSlots()
+        let conflictingSettings = preemptionController.conflictingSettings(for: configuredSlots)
+        guard !conflictingSettings.isEmpty else { return }
+
+        systemGestureManager.suppress(conflictingSettings: conflictingSettings)
+    }
+
+    private func configuredGestureSlots() -> Set<GestureSlot> {
+        Set(
+            supportedGestureSlots.filter {
+                KeyboardShortcuts.getShortcut(for: ShortcutRegistry.name(for: $0)) != nil
+            }
+        )
     }
 }
 

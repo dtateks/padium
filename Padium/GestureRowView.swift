@@ -5,6 +5,20 @@ struct GestureRowView: View {
     let slot: GestureSlot
     var isConflicting: Bool = false
 
+    var onShortcutChange: () -> Void = {}
+    @State private var lastKnownShortcut: KeyboardShortcuts.Shortcut?
+
+    init(
+        slot: GestureSlot,
+        isConflicting: Bool = false,
+        onShortcutChange: @escaping () -> Void = {}
+    ) {
+        self.slot = slot
+        self.isConflicting = isConflicting
+        self.onShortcutChange = onShortcutChange
+        _lastKnownShortcut = State(initialValue: KeyboardShortcuts.getShortcut(for: ShortcutRegistry.name(for: slot)))
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 2) {
             LabeledContent {
@@ -25,6 +39,12 @@ struct GestureRowView: View {
                     .font(.caption2)
                     .foregroundStyle(.orange)
             }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: UserDefaults.didChangeNotification)) { _ in
+            let currentShortcut = KeyboardShortcuts.getShortcut(for: ShortcutRegistry.name(for: slot))
+            guard currentShortcut != lastKnownShortcut else { return }
+            lastKnownShortcut = currentShortcut
+            onShortcutChange()
         }
     }
 }

@@ -33,4 +33,36 @@ struct ShortcutRegistryTests {
         let run2 = GestureSlot.allCases.map(\.rawValue)
         #expect(run1 == run2)
     }
+
+    @Test @MainActor func verticalSystemGestureSuppressionAlsoDisablesDockKeys() {
+        let settings = [
+            SystemGestureSetting(
+                key: "TrackpadFourFingerVertSwipeGesture",
+                title: "Mission Control / App Exposé (4 fingers)",
+                isEnabled: true,
+                conflictingSlots: [.fourFingerSwipeUp, .fourFingerSwipeDown]
+            )
+        ]
+
+        let disabledPreferenceKeys = SystemGestureManager.disabledPreferenceKeys(for: settings)
+
+        #expect(disabledPreferenceKeys.trackpadKeys == Set(["TrackpadFourFingerVertSwipeGesture"]))
+        #expect(disabledPreferenceKeys.dockKeys == Set(["showAppExposeGestureEnabled", "showMissionControlGestureEnabled"]))
+    }
+
+    @Test @MainActor func horizontalSystemGestureSuppressionLeavesDockKeysEnabled() {
+        let settings = [
+            SystemGestureSetting(
+                key: "TrackpadThreeFingerHorizSwipeGesture",
+                title: "Swipe between full-screen apps (3 fingers)",
+                isEnabled: true,
+                conflictingSlots: [.threeFingerSwipeLeft, .threeFingerSwipeRight]
+            )
+        ]
+
+        let disabledPreferenceKeys = SystemGestureManager.disabledPreferenceKeys(for: settings)
+
+        #expect(disabledPreferenceKeys.trackpadKeys == Set(["TrackpadThreeFingerHorizSwipeGesture"]))
+        #expect(disabledPreferenceKeys.dockKeys.isEmpty)
+    }
 }

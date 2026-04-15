@@ -20,8 +20,8 @@ struct SystemGestureSetting: Identifiable, Sendable {
 final class PreemptionController {
     private let trackpadPreferenceDomain = "com.apple.AppleMultitouchTrackpad"
 
-    func currentPolicy() -> PreemptionPolicy {
-        let conflicts = currentSystemGestureSettings().filter(\.isEnabled)
+    func currentPolicy(activeSlots: Set<GestureSlot> = Set(GestureSlot.allCases)) -> PreemptionPolicy {
+        let conflicts = conflictingSettings(for: activeSlots)
         let notice: String? = conflicts.isEmpty ? nil :
             "Some macOS trackpad gestures are still enabled and will fire alongside Padium. " +
             "Open System Settings → Trackpad → More Gestures and turn off the conflicting gestures listed below."
@@ -60,11 +60,17 @@ final class PreemptionController {
         ]
     }
 
-    /// Returns the set of Padium gesture slots that currently conflict with enabled system gestures.
-    func conflictingSlots() -> Set<GestureSlot> {
+    func conflictingSettings(for activeSlots: Set<GestureSlot> = Set(GestureSlot.allCases)) -> [SystemGestureSetting] {
+        currentSystemGestureSettings().filter { setting in
+            setting.isEnabled && !activeSlots.isDisjoint(with: setting.conflictingSlots)
+        }
+    }
+
+    /// Returns the set of active Padium gesture slots that currently conflict with enabled system gestures.
+    func conflictingSlots(for activeSlots: Set<GestureSlot> = Set(GestureSlot.allCases)) -> Set<GestureSlot> {
         var result = Set<GestureSlot>()
-        for setting in currentSystemGestureSettings() where setting.isEnabled {
-            result.formUnion(setting.conflictingSlots)
+        for setting in conflictingSettings(for: activeSlots) {
+            result.formUnion(setting.conflictingSlots.filter(activeSlots.contains))
         }
         return result
     }

@@ -26,7 +26,7 @@ Bundle ID: `com.padium`, version 0.1.0. LSUIElement=true (no Dock icon).
 - `PadiumApp` skips that launch prompt+quit path under XCTest so host-app tests can run.
 - After re-sign, `tccutil reset Accessibility com.padium` only if permissions are stale.
 - Requires granting Accessibility permission in System Settings.
-- App automatically disables system trackpad gestures on launch (via `defaults write` + `killall Dock`) and restores originals on quit; `SystemGestureManager` persists a backup to UserDefaults so crash recovery can restore on next launch
+- App only disables macOS system trackpad gestures for Padium slots that currently have configured shortcuts; unbound slots leave the original macOS gestures enabled. `SystemGestureManager` persists a backup to UserDefaults so crash recovery can restore on next launch
 - `ScrollSuppressor` uses a CGEventTap to consume scroll wheel events while 3+ fingers are active on the trackpad, preventing 2-finger scroll from firing during 3-finger gestures; also suppresses momentum scroll after finger lift
 
 ## Test
@@ -60,13 +60,13 @@ PadiumApp (@main)
 - XCTest launch path bypasses that prompt+quit behavior so host-app tests can execute.
 - `GestureEngine` commits only when finger count and touch identifiers remain stable; after emission it suppresses duplicates until a lift frame
 - `GestureClassifier` requires stable touch identifiers, dominant-axis commitment, and per-finger direction agreement; vertical swipes tolerate lateral drift while the dominant axis stays vertical
-- Shared sensitivity changes restart the runtime so new thresholds take effect immediately; default sensitivity maps to the empirical `0.10` swipe threshold
+- Shared sensitivity changes apply immediately without restarting the runtime; `GestureClassifier` reads the current threshold live. UI sensitivity applies a +20 point base boost before threshold mapping, so default 50% behaves like the previous 70% calibration
 - `ShortcutRegistry.name(for:)` is the SINGLE source of truth for slot→`KeyboardShortcuts.Name` mapping — no ad-hoc Name creation elsewhere
 - Settings window: app launch starts permission polling immediately; menu-bar selection explicitly calls `openWindow(id: "settings")` and focuses the existing window; `onDisappear` resets `isSettingsPresented` to `false`
 - Permissions revoked while running → `refreshPermissions()` stops the runtime
-- `SystemGestureManager.shared` handles save/disable/restore of system gesture preferences; called by `AppState.startRuntimeIfNeeded()` (suppress) and `stopRuntime()` (restore); also hooked to `NSApplication.willTerminateNotification` and SIGTERM signal handler
+- `SystemGestureManager.shared` handles selective save/disable/restore of system gesture preferences; `AppState` computes configured-slot conflicts before suppressing, and restores originals on runtime stop / app termination
 - `SystemGestureManager.restoreIfNeeded()` runs at app launch to recover from a crash that left gestures suppressed
-- `PreemptionController` detects per-slot system gesture conflicts; UI shows per-row warnings + "Open Trackpad Settings" button (serves as fallback if auto-suppress ever fails)
+- `PreemptionController` detects per-slot system gesture conflicts for currently configured Padium slots; UI warnings should ignore unbound slots and only reflect active conflicts
 
 ## Coding Conventions
 - `@MainActor` on all UI-bound and state classes

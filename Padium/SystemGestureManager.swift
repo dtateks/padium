@@ -17,14 +17,19 @@ final class SystemGestureManager {
     private let dockDomain = "com.apple.dock"
     private let backupKey = "padium.systemGestureBackup"
 
-    private let trackpadKeys = [
+    private static let trackpadKeys = [
         "TrackpadThreeFingerHorizSwipeGesture",
         "TrackpadThreeFingerVertSwipeGesture",
         "TrackpadFourFingerHorizSwipeGesture",
         "TrackpadFourFingerVertSwipeGesture",
     ]
 
-    private let dockBoolKeys = [
+    private static let verticalTrackpadKeys: Set<String> = [
+        "TrackpadThreeFingerVertSwipeGesture",
+        "TrackpadFourFingerVertSwipeGesture",
+    ]
+
+    private static let dockBoolKeys = [
         "showMissionControlGestureEnabled",
         "showAppExposeGestureEnabled",
     ]
@@ -33,11 +38,17 @@ final class SystemGestureManager {
 
     // MARK: - Public
 
-    /// Disable all system trackpad gestures that conflict with Padium.
+    /// Disable only the system gestures that conflict with configured Padium slots.
     /// Saves original values first so they can be restored.
-    func suppress() {
+    func suppress(conflictingSettings: [SystemGestureSetting]) {
+        let disabledPreferenceKeys = Self.disabledPreferenceKeys(for: conflictingSettings)
+        guard !disabledPreferenceKeys.trackpadKeys.isEmpty || !disabledPreferenceKeys.dockKeys.isEmpty else {
+            isSuppressed = false
+            return
+        }
+
         saveBackup()
-        writeDisabledValues()
+        writeDisabledValues(trackpadKeys: disabledPreferenceKeys.trackpadKeys, dockKeys: disabledPreferenceKeys.dockKeys)
         restartDock()
         isSuppressed = true
         PadiumLogger.gesture.info("System gestures suppressed")
@@ -46,7 +57,7 @@ final class SystemGestureManager {
     /// Restore original system trackpad gesture settings.
     func restore() {
         guard let backup = loadBackup() else {
-            PadiumLogger.gesture.warning("No system gesture backup found; skipping restore")
+            isSuppressed = false
             return
         }
         writeRestoredValues(backup)
@@ -69,12 +80,12 @@ final class SystemGestureManager {
         var backup: [String: Any] = [:]
 
         let trackpadPrefs = UserDefaults.standard.persistentDomain(forName: trackpadDomain) ?? [:]
-        for key in trackpadKeys {
+        for key in Self.trackpadKeys {
             backup["trackpad.\(key)"] = trackpadPrefs[key] as? Int ?? 0
         }
 
         let dockPrefs = UserDefaults.standard.persistentDomain(forName: dockDomain) ?? [:]
-        for key in dockBoolKeys {
+        for key in Self.dockBoolKeys {
             backup["dock.\(key)"] = dockPrefs[key] as? Bool ?? true
         }
 
@@ -91,21 +102,21 @@ final class SystemGestureManager {
 
     // MARK: - Write preferences
 
-    private func writeDisabledValues() {
+    private func writeDisabledValues(trackpadKeys: Set<String>, dockKeys: Set<String>) {
         for key in trackpadKeys {
             shellDefaults(write: trackpadDomain, key: key, value: "-int 0")
         }
-        for key in dockBoolKeys {
+        for key in dockKeys {
             shellDefaults(write: dockDomain, key: key, value: "-bool false")
         }
     }
 
     private func writeRestoredValues(_ backup: [String: Any]) {
-        for key in trackpadKeys {
+        for key in Self.trackpadKeys {
             let value = backup["trackpad.\(key)"] as? Int ?? 0
             shellDefaults(write: trackpadDomain, key: key, value: "-int \(value)")
         }
-        for key in dockBoolKeys {
+        for key in Self.dockBoolKeys {
             let value = backup["dock.\(key)"] as? Bool ?? true
             shellDefaults(write: dockDomain, key: key, value: "-bool \(value ? "true" : "false")")
         }
@@ -129,5 +140,12 @@ final class SystemGestureManager {
         task.arguments = ["Dock"]
         try? task.run()
         task.waitUntilExit()
+    }
+
+    static func disabledPreferenceKeys(for conflictingSettings: [SystemGestureSetting]) -> (trackpadKeys: Set<String>, dockKeys: Set<String>) {
+        let trackpadKeys = Set(conflictingSettings.map(\.key))
+        let includesVerticalGesture = !trackpadKeys.isDisjoint(with: Self.verticalTrackpadKeys)
+        let dockKeys = includesVerticalGesture ? Set(Self.dockBoolKeys) : []
+        return (trackpadKeys, dockKeys)
     }
 }

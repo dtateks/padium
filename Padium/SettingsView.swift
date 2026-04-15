@@ -65,13 +65,14 @@ struct SettingsView: View {
             ForEach(sections, id: \.title) { section in
                 Section(section.title) {
                     ForEach(section.slots, id: \.self) { slot in
-                        GestureRowView(
-                            slot: slot,
-                            isConflicting: appState.conflictingSlots.contains(slot)
-                        )
-                    }
+                    GestureRowView(
+                        slot: slot,
+                        isConflicting: appState.conflictingSlots.contains(slot),
+                        onShortcutChange: appState.handleShortcutConfigurationChange
+                    )
                 }
             }
+        }
         }
         .formStyle(.grouped)
     }
