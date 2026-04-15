@@ -35,10 +35,22 @@ enum GestureSensitivitySetting {
 
 // Classifies raw touch-frame sequences into swipe events using stable touch IDs,
 // dominant-axis commitment, and per-finger direction agreement.
+//
+// OMS normalizes touch coordinates per-axis independently to [0,1]. Because the
+// trackpad is wider than it is tall (~1.5:1), a horizontal swipe produces a smaller
+// normalized dx than a vertical swipe of the same physical distance. We compensate
+// by scaling dx by the aspect ratio so that the threshold and dominance checks
+// operate in physical-proportional space.
 struct GestureClassifier: Sendable {
 
     // Minimum normalized distance to register as a swipe.
     private let swipeThreshold: Float
+
+    // Trackpad aspect ratio (width / height). OMS normalizes each axis to [0,1]
+    // independently, so horizontal displacement is underrepresented by this factor.
+    // Typical MacBook trackpads are ~1.4–1.6:1; 1.5 is a safe middle ground.
+    // This scales dx so thresholds are equalized across axes.
+    static let trackpadAspectRatio: Float = 1.5
 
     // Dominant axis must clearly outweigh the cross axis before direction locks.
     private static let axisDominanceRatio: Float = 1.2
@@ -87,7 +99,9 @@ struct GestureClassifier: Sendable {
         let displacements = firstContacts.compactMap { identifier, startPoint in
             currentContacts[identifier].map { currentPoint in
                 (
-                    dx: currentPoint.normalizedX - startPoint.normalizedX,
+                    // Scale dx by aspect ratio to compensate for per-axis normalization.
+                    // Without this, horizontal swipes need ~1.5x more physical movement.
+                    dx: (currentPoint.normalizedX - startPoint.normalizedX) * Self.trackpadAspectRatio,
                     dy: currentPoint.normalizedY - startPoint.normalizedY
                 )
             }

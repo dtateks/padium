@@ -56,7 +56,10 @@ final class GestureEngine {
         let localSupportedSlots = supportedSlots
         let localContinuation = continuation
         pipelineTask = Task { [localSource, localClassifier, localSupportedSlots, localContinuation] in
-            defer { localContinuation.finish() }
+            defer {
+                localContinuation.finish()
+                ScrollSuppressor.shared.isMultitouchActive = false
+            }
 
             var candidate: GestureCandidate?
             var waitingForLift = false
@@ -65,21 +68,30 @@ final class GestureEngine {
                 if frame.isEmpty {
                     candidate = nil
                     waitingForLift = false
+                    ScrollSuppressor.shared.isMultitouchActive = false
                     continue
                 }
 
-                if waitingForLift { continue }
+                if waitingForLift {
+                    // Keep suppression active while waiting for lift
+                    continue
+                }
 
                 guard let contacts = localClassifier.stableActiveContacts(in: frame) else {
                     candidate = nil
+                    ScrollSuppressor.shared.isMultitouchActive = false
                     continue
                 }
 
                 let fingerCount = contacts.count
                 guard fingerCount == 3 || fingerCount == 4 else {
                     candidate = nil
+                    ScrollSuppressor.shared.isMultitouchActive = false
                     continue
                 }
+
+                // 3+ fingers active — suppress scroll events
+                ScrollSuppressor.shared.isMultitouchActive = true
 
                 guard let activeCandidate = candidate else {
                     candidate = GestureCandidate(originContacts: contacts, fingerCount: fingerCount)
