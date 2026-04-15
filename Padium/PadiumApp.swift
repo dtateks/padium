@@ -10,9 +10,32 @@ struct PadiumApp: App {
             state.handleAppLaunch {
                 NSApp.terminate(nil)
             }
+
+            // Restore system gestures on any normal termination path.
+            // Use both willTerminate (normal quit) and SIGTERM handler (force quit from Activity Monitor).
+            NotificationCenter.default.addObserver(
+                forName: NSApplication.willTerminateNotification,
+                object: nil,
+                queue: .main
+            ) { _ in
+                SystemGestureManager.shared.restore()
+            }
+
+            let src = DispatchSource.makeSignalSource(signal: SIGTERM, queue: .main)
+            src.setEventHandler {
+                SystemGestureManager.shared.restore()
+                exit(0)
+            }
+            src.resume()
+            signal(SIGTERM, SIG_IGN)
+            // Keep reference alive
+            Self._sigtermSource = src
         }
         _appState = State(initialValue: state)
     }
+
+    // Prevent ARC from releasing the SIGTERM source.
+    nonisolated(unsafe) private static var _sigtermSource: DispatchSourceSignal?
 
     private static var isRunningUnderTestHarness: Bool {
         ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil
@@ -39,9 +62,15 @@ struct MenuBarContentView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             if appState.isRunning {
-                Label("Running", systemImage: "checkmark.circle.fill")
-                    .foregroundStyle(.green)
-                    .font(.caption)
+                if appState.conflictingSlots.isEmpty {
+                    Label("Running", systemImage: "checkmark.circle.fill")
+                        .foregroundStyle(.green)
+                        .font(.caption)
+                } else {
+                    Label("Running — system gesture conflicts", systemImage: "exclamationmark.triangle.fill")
+                        .foregroundStyle(.orange)
+                        .font(.caption)
+                }
             } else if appState.permissionState == .denied {
                 Label("Accessibility required", systemImage: "exclamationmark.triangle")
                     .foregroundStyle(.orange)
@@ -96,7 +125,10 @@ struct SettingsContentView: View {
             PermissionsView(
                 permissionState: appState.permissionState,
                 systemGestureNotice: appState.systemGestureNotice,
-                onRequestAccessibility: { appState.requestAccessibility() }
+                conflictingSettings: appState.systemGestureSettings(),
+                onRequestAccessibility: { appState.requestAccessibility() },
+                onOpenTrackpadSettings: { appState.openTrackpadSettings() },
+                onRefreshConflicts: { appState.refreshSystemGestureConflicts() }
             )
             .tabItem { Label("Permissions", systemImage: "lock.shield") }
 

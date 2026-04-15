@@ -23,26 +23,31 @@ final class AppState {
     var permissionState: PermissionState { coordinator.permissionState }
     var isRunning: Bool { runtimeTask != nil }
     var systemGestureNotice: String?
+    var conflictingSlots: Set<GestureSlot> = []
     let supportedGestureSlots: [GestureSlot]
     var gestureSensitivity: Double
     var isSettingsPresented: Bool = false
 
     private let coordinator: PermissionCoordinator
+    private let preemptionController: PreemptionController
     private let gestureEngine: any GestureRuntimeControlling
     private let shortcutEmitter: any ShortcutEmitting
     private var runtimeTask: Task<Void, Never>?
 
     init(
         permissionChecker: PermissionChecking = SystemPermissionChecker(),
-        preemptionPolicy: PreemptionPolicy? = nil,
+        preemptionController: PreemptionController? = nil,
         gestureEngine: (any GestureRuntimeControlling)? = nil,
         shortcutEmitter: (any ShortcutEmitting)? = nil
     ) {
         self.coordinator = PermissionCoordinator(checker: permissionChecker)
 
-        let policy = preemptionPolicy ?? PreemptionController().currentPolicy()
+        let controller = preemptionController ?? PreemptionController()
+        self.preemptionController = controller
+        let policy = controller.currentPolicy()
         let supportedGestureSlots = Self.resolveSupportedGestureSlots(from: policy)
         self.systemGestureNotice = policy.ownerNotice
+        self.conflictingSlots = controller.conflictingSlots()
         self.supportedGestureSlots = supportedGestureSlots
         self.gestureSensitivity = GestureSensitivitySetting.storedValue()
 
@@ -55,9 +60,10 @@ final class AppState {
         self.shortcutEmitter = shortcutEmitter ?? ShortcutEmitter()
     }
 
-    /// Check permissions and auto-start runtime if granted.
+    /// Check permissions and auto-start runtime if granted. Also refreshes system gesture conflicts.
     func refreshPermissions() {
         coordinator.checkPermissions()
+        refreshSystemGestureConflicts()
 
         if coordinator.isFullyGranted {
             startRuntimeIfNeeded()
@@ -70,7 +76,24 @@ final class AppState {
         coordinator.requestAccessibility()
     }
 
+    func refreshSystemGestureConflicts() {
+        let policy = preemptionController.currentPolicy()
+        systemGestureNotice = policy.ownerNotice
+        conflictingSlots = preemptionController.conflictingSlots()
+    }
+
+    func openTrackpadSettings() {
+        preemptionController.openTrackpadSettings()
+    }
+
+    func systemGestureSettings() -> [SystemGestureSetting] {
+        preemptionController.currentSystemGestureSettings()
+    }
+
     func handleAppLaunch(onMissingPermissions: @escaping @MainActor () -> Void) {
+        // If a previous session crashed without restoring system gestures, restore now.
+        SystemGestureManager.shared.restoreIfNeeded()
+
         startPermissionPolling()
         refreshPermissions()
 
@@ -109,10 +132,16 @@ final class AppState {
 
     private func startRuntimeIfNeeded() {
         guard runtimeTask == nil else { return }
+
+        SystemGestureManager.shared.suppress()
+        ScrollSuppressor.shared.start()
+
         guard gestureEngine.start() else {
             if let startError = gestureEngine.lastStartError {
                 PadiumLogger.gesture.error("Gesture engine failed to start: \(String(describing: startError), privacy: .public)")
             }
+            ScrollSuppressor.shared.stop()
+            SystemGestureManager.shared.restore()
             return
         }
 
@@ -129,6 +158,8 @@ final class AppState {
         gestureEngine.stop()
         runtimeTask?.cancel()
         runtimeTask = nil
+        ScrollSuppressor.shared.stop()
+        SystemGestureManager.shared.restore()
     }
 
     private func restartRuntime() {
