@@ -78,7 +78,7 @@ final class ScrollSuppressor: @unchecked Sendable {
 
         // Run the tap on a dedicated thread so it doesn't block the main thread
         let thread = Thread { [weak self] in
-            guard let self, let source = self.runLoopSource else { return }
+            guard let self, let source = self.runLoopSource, let tap = self.eventTap else { return }
             CFRunLoopAddSource(CFRunLoopGetCurrent(), source, .commonModes)
             CGEvent.tapEnable(tap: tap, enable: true)
             CFRunLoopRun()
@@ -95,7 +95,7 @@ final class ScrollSuppressor: @unchecked Sendable {
         if let tap = eventTap {
             CGEvent.tapEnable(tap: tap, enable: false)
         }
-        if let source = runLoopSource {
+        if runLoopSource != nil {
             // Signal the run loop on the tap thread to stop
             if let thread = tapThread {
                 CFRunLoopStop(CFRunLoopGetMain()) // fallback

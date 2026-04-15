@@ -317,6 +317,13 @@
 				);
 				MACOSX_DEPLOYMENT_TARGET = 14.0;
 				MARKETING_VERSION = 0.1.0;
+				OTHER_SWIFT_FLAGS = (
+					"$(inherited)",
+					"-Xfrontend",
+					"-disable-autolink-framework",
+					"-Xfrontend",
+					"AppIntents",
+				);
 				PRODUCT_BUNDLE_IDENTIFIER = com.padium;
 				PRODUCT_NAME = Padium;
 				SWIFT_EMIT_LOC_STRINGS = YES;
@@ -344,6 +351,13 @@
 				);
 				MACOSX_DEPLOYMENT_TARGET = 14.0;
 				MARKETING_VERSION = 0.1.0;
+				OTHER_SWIFT_FLAGS = (
+					"$(inherited)",
+					"-Xfrontend",
+					"-disable-autolink-framework",
+					"-Xfrontend",
+					"AppIntents",
+				);
 				PRODUCT_BUNDLE_IDENTIFIER = com.padium;
 				PRODUCT_NAME = Padium;
 				SWIFT_EMIT_LOC_STRINGS = YES;
@@ -361,6 +375,13 @@
 				CURRENT_PROJECT_VERSION = 1;
 				GENERATE_INFOPLIST_FILE = YES;
 				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				OTHER_SWIFT_FLAGS = (
+					"$(inherited)",
+					"-Xfrontend",
+					"-disable-autolink-framework",
+					"-Xfrontend",
+					"AppIntents",
+				);
 				PRODUCT_BUNDLE_IDENTIFIER = com.padium.tests;
 				PRODUCT_NAME = PadiumTests;
 				SWIFT_STRICT_CONCURRENCY = complete;
@@ -378,6 +399,13 @@
 				CURRENT_PROJECT_VERSION = 1;
 				GENERATE_INFOPLIST_FILE = YES;
 				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				OTHER_SWIFT_FLAGS = (
+					"$(inherited)",
+					"-Xfrontend",
+					"-disable-autolink-framework",
+					"-Xfrontend",
+					"AppIntents",
+				);
 				PRODUCT_BUNDLE_IDENTIFIER = com.padium.tests;
 				PRODUCT_NAME = PadiumTests;
 				SWIFT_STRICT_CONCURRENCY = complete;

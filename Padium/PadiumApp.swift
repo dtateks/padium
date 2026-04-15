@@ -18,13 +18,12 @@ struct PadiumApp: App {
                 object: nil,
                 queue: .main
             ) { _ in
-                SystemGestureManager.shared.restore()
+                Self.restoreSystemGestures()
             }
 
             let src = DispatchSource.makeSignalSource(signal: SIGTERM, queue: .main)
             src.setEventHandler {
-                SystemGestureManager.shared.restore()
-                exit(0)
+                Self.restoreSystemGesturesAndExit()
             }
             src.resume()
             signal(SIGTERM, SIG_IGN)
@@ -36,6 +35,19 @@ struct PadiumApp: App {
 
     // Prevent ARC from releasing the SIGTERM source.
     nonisolated(unsafe) private static var _sigtermSource: DispatchSourceSignal?
+
+    nonisolated private static func restoreSystemGestures() {
+        Task { @MainActor in
+            SystemGestureManager.shared.restore()
+        }
+    }
+
+    nonisolated private static func restoreSystemGesturesAndExit() {
+        Task { @MainActor in
+            SystemGestureManager.shared.restore()
+            exit(0)
+        }
+    }
 
     private static var isRunningUnderTestHarness: Bool {
         ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil
