@@ -26,8 +26,6 @@ Package.resolved
 *.profraw
 *.profdata
 
-# Plans (scratch working docs)
-plans/
 
 # Environment
 .env
