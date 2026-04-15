@@ -5,17 +5,17 @@
 - `@MainActor struct XxxTests` — all test structs are MainActor-isolated
 - Stubs implement DI protocols: `StubGestureSource`, `StubPermissionChecker`, `StubShortcutSender`
 - Stubs expose call counts (`startCallCount`, `stopCallCount`) and controllable async streams
-- Frame helpers like `makeSwipeFrames(fingerCount:startX:startY:endX:endY:)` build `[[TouchPoint]]` for classifier/engine tests
+- Frame helpers like `makeSwipeFrames(fingerCount:startX:startY:endX:endY:)` and tap/double-tap builders build `[[TouchPoint]]` for classifier/engine tests
 - Async pipeline tests: yield frames into stub source → `Task.yield()` to flush → assert on collected events
 - NEVER `Task.sleep` — use `continuation.yield()` + `Task.yield()` for deterministic sequencing
-- Gesture regression coverage must include stable-ID commit, dominant-axis rejection, lateral-drift tolerance on vertical swipes, per-finger agreement, threshold rejection, and duplicate suppression until lift
+- Gesture regression coverage must include stable-ID commit, dominant-axis rejection, lateral-drift tolerance on vertical swipes, per-finger agreement, swipe threshold rejection, duplicate suppression until lift, and deterministic 3-finger/4-finger tap + double-tap timing
 - Permission launch coverage must include immediate prompt+quit on missing Accessibility permission and XCTest bypass of that path in `PadiumApp`
 
 # Coverage Map
 
 | Test File | Component | What's Verified |
 |-----------|-----------|-----------------|
-| GestureEngineTests.swift | GestureEngine | Start/stop lifecycle, stream restart, policy slot filtering, stable-ID commit, duplicate suppression until lift |
+| GestureEngineTests.swift | GestureEngine | Start/stop lifecycle, stream restart, policy slot filtering, stable-ID commit, duplicate suppression until lift, tap/double-tap arbitration |
 | GestureClassifierTests.swift | GestureClassifier | All 8 swipe directions, finger count gating, stable IDs, dominant-axis rejection, lateral-drift tolerance on vertical swipes, opposing-direction rejection, threshold rejection |
 | PermissionCoordinatorTests.swift | PermissionCoordinator | State transitions: checking→granted, checking→denied, partial grant, revocation while enabled |
 | ShortcutEmitterTests.swift | ShortcutEmitter | Lookup + send delegation, explicit modifier/key sequencing, unbound slot returns false |

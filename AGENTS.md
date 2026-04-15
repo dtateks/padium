@@ -5,7 +5,7 @@
 **Branch:** unknown
 
 ## Project Overview
-macOS menu bar utility (Swift 5.9+, SwiftUI, Xcode). Trackpad swipe gestures → keyboard shortcuts.
+macOS menu bar utility (Swift 5.9+, SwiftUI, Xcode). Trackpad swipe/tap gestures → keyboard shortcuts.
 Bundle ID: `com.padium`, version 0.1.0. LSUIElement=true (no Dock icon).
 
 **Scope**: owner-local MVP only — do NOT add packaging, export, distribution, or launch-at-login features.
@@ -13,7 +13,7 @@ Bundle ID: `com.padium`, version 0.1.0. LSUIElement=true (no Dock icon).
 ## Dependencies (SPM via Xcode)
 - `KeyboardShortcuts` 2.4.0 — shortcut recording UI + UserDefaults persistence
 - `OpenMultitouchSupport` 3.0.3 — private multitouch API bridge (OMSManager)
-- Shared gesture sensitivity is persisted once and reused by every swipe slot.
+- Shared gesture sensitivity applies to swipes only; tap and double-tap gestures use fixed thresholds.
 
 ## Build & Run
 - Local dev workflow uses `scripts/run-dev.sh`:
@@ -45,12 +45,12 @@ PadiumApp (@main)
     ├─ PermissionCoordinator — AXIsProcessTrusted polling + prompt
     ├─ GestureEngine — AsyncStream pipeline: source → classifier → filtered events
     │   ├─ OMSGestureSource — OpenMultitouchSupport bridge
-    │   └─ GestureClassifier — frame sequences → GestureEvent (8 swipe slots)
+    │   └─ GestureClassifier — swipe classification + tap travel helper
     └─ ShortcutEmitter — ShortcutRegistry lookup → CGEvent key-down/key-up post
 ```
 
 ## Runtime Pipeline
-`OMSGestureSource` → touch frames → `GestureEngine` tracks a candidate only while finger count + touch IDs stay stable → `GestureClassifier.classifyIncremental()` → emits once, then ignores further frames until lift → `AppState` for-await loop → `ShortcutEmitter` → `CGEvent` post
+`OMSGestureSource` → touch frames → `GestureEngine` tracks a candidate only while finger count + touch IDs stay stable → `GestureClassifier.classifyIncremental()` for swipes or tap/double-tap arbitration on lift → emits once, then ignores further frames until lift → `AppState` for-await loop → `ShortcutEmitter` → `CGEvent` post
 
 ## Key Contracts
 - `AppState` is the ONLY orchestration boundary — views toggle state, never run side effects
@@ -60,7 +60,9 @@ PadiumApp (@main)
 - XCTest launch path bypasses that prompt+quit behavior so host-app tests can execute.
 - `GestureEngine` commits only when finger count and touch identifiers remain stable; after emission it suppresses duplicates until a lift frame
 - `GestureClassifier` requires stable touch identifiers, dominant-axis commitment, and per-finger direction agreement; vertical swipes tolerate lateral drift while the dominant axis stays vertical
-- Shared sensitivity changes apply immediately without restarting the runtime; `GestureClassifier` reads the current threshold live. UI sensitivity applies a +20 point base boost before threshold mapping, so default 50% behaves like the previous 70% calibration
+- `GestureEngine` arbitrates tap vs double-tap recognition from raw touch frames; 3-finger and 4-finger clicks/double-clicks are experimental and emitted only when the finger-count-specific thresholds are met
+- Shared sensitivity changes apply immediately without restarting the runtime for swipes only; `GestureClassifier` reads the current threshold live. UI sensitivity applies a +20 point base boost before threshold mapping, so default 50% behaves like the previous 70% calibration
+- `AppState` updates active slots from recorder `onChange` callbacks before runtime decisions; shortcut-binding changes must refresh conflict state and gesture routing together
 - `ShortcutRegistry.name(for:)` is the SINGLE source of truth for slot→`KeyboardShortcuts.Name` mapping — no ad-hoc Name creation elsewhere
 - Settings window: app launch starts permission polling immediately; menu-bar selection explicitly calls `openWindow(id: "settings")` and focuses the existing window; `onDisappear` resets `isSettingsPresented` to `false`
 - Permissions revoked while running → `refreshPermissions()` stops the runtime
@@ -74,13 +76,12 @@ PadiumApp (@main)
 - Protocols for DI boundaries: `GestureSource`, `GestureRuntimeControlling`, `ShortcutEmitting`, `PermissionChecking`
 - `@discardableResult` on `start()`/`emitConfiguredShortcut()` methods
 - Logging via `PadiumLogger` (OSLog): categories `gesture`, `shortcut`, `permission`
-- Classifier thresholds are empirically derived — do NOT change without new evidence
+- Classifier thresholds are empirically derived — do NOT change without new evidence; swipe sensitivity and tap/double-tap thresholds are intentionally separate
 - Event synthesis posts explicit modifier transitions before/after the key and uses `.cghidEventTap` for shortcut injection
 
 ## Anti-Patterns
 - NEVER create `KeyboardShortcuts.Name` outside `ShortcutRegistry`
 - NEVER use `Task.sleep` in tests — causes flaky non-determinism
-- NEVER add tap/double-tap gesture support — spikes-preemption.md §4 confirms swipe-only
 - NEVER rely on temporary print debugging in OMS plumbing; use `PadiumLogger.gesture`
 - NEVER reintroduce flagged main-key pairs on `.cgAnnotatedSessionEventTap` for shortcut emission
 
