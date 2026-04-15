@@ -22,6 +22,10 @@ struct SettingsView: View {
         }
     }
 
+    private var showsExperimentalTapNotice: Bool {
+        appState.supportedGestureSlots.contains(where: \.isTapGesture)
+    }
+
     var body: some View {
         Form {
             if let notice = appState.systemGestureNotice {
@@ -57,22 +61,30 @@ struct SettingsView: View {
                     in: GestureSensitivitySetting.minimumValue...GestureSensitivitySetting.maximumValue
                 )
 
-                Text("Higher sensitivity triggers all swipe gestures with shorter movement.")
+                Text("Higher sensitivity triggers swipe gestures with shorter movement. Click and double-click gestures use fixed timing and movement thresholds.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
+            }
+
+            if showsExperimentalTapNotice {
+                Section {
+                    Label("Experimental click gestures can overlap with macOS Look Up, Mission Control, App Exposé, or Show Desktop depending on your trackpad settings.", systemImage: "flask")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
             }
 
             ForEach(sections, id: \.title) { section in
                 Section(section.title) {
                     ForEach(section.slots, id: \.self) { slot in
-                    GestureRowView(
-                        slot: slot,
-                        isConflicting: appState.conflictingSlots.contains(slot),
-                        onShortcutChange: appState.handleShortcutConfigurationChange
-                    )
+                        GestureRowView(
+                            slot: slot,
+                            isConflicting: appState.conflictingSlots.contains(slot),
+                            onShortcutChange: appState.handleShortcutConfigurationChange
+                        )
+                    }
                 }
             }
-        }
         }
         .formStyle(.grouped)
     }

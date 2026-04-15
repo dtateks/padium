@@ -9,6 +9,7 @@ protocol GestureRuntimeControlling: AnyObject {
     var lastStartError: GestureEngineError? { get }
     @discardableResult func start() -> Bool
     func stop()
+    func updateActiveSlots(_ activeSlots: Set<GestureSlot>)
 }
 
 @MainActor
@@ -82,6 +83,7 @@ final class AppState {
         }
 
         self.shortcutEmitter = shortcutEmitter ?? ShortcutEmitter()
+        self.gestureEngine.updateActiveSlots(configuredGestureSlots())
         refreshSystemGestureConflicts()
     }
 
@@ -154,6 +156,7 @@ final class AppState {
     }
 
     private func startRuntimeIfNeeded() {
+        gestureEngine.updateActiveSlots(configuredGestureSlots())
         guard runtimeTask == nil else { return }
 
         applySystemGestureSuppression()
@@ -186,6 +189,7 @@ final class AppState {
     }
 
     func handleShortcutConfigurationChange() {
+        gestureEngine.updateActiveSlots(configuredGestureSlots())
         if isRunning {
             applySystemGestureSuppression()
         }

@@ -38,6 +38,12 @@ enum GestureSensitivitySetting {
     }
 }
 
+enum GestureTapSettings {
+    static let maximumTravel: Float = 0.05
+    static let maximumDuration: TimeInterval = 0.2
+    static let doubleTapWindow: TimeInterval = 0.3
+}
+
 // Classifies raw touch-frame sequences into swipe events using stable touch IDs,
 // dominant-axis commitment, and per-finger direction agreement.
 //
@@ -169,6 +175,12 @@ struct GestureClassifier: Sendable {
             }
         }
         return contactsByIdentifier
+    }
+
+    static func travelDistance(from startPoint: TouchPoint, to currentPoint: TouchPoint) -> Float {
+        let dx = (currentPoint.normalizedX - startPoint.normalizedX) * trackpadAspectRatio
+        let dy = currentPoint.normalizedY - startPoint.normalizedY
+        return sqrt((dx * dx) + (dy * dy))
     }
 
     // MARK: - Internal

@@ -1,5 +1,6 @@
 import Testing
 @testable import Padium
+import Foundation
 
 // Tests for GestureEngine — lifecycle, policy filtering, and event pipeline.
 @MainActor
@@ -42,6 +43,78 @@ struct GestureEngineTests {
         enum StubError: Error { case cannotStart }
     }
 
+    @MainActor
+    final class ManualGestureScheduler: GestureScheduling {
+        final class ScheduledWork: GestureScheduledWork {
+            private(set) var isCancelled = false
+
+            func cancel() {
+                isCancelled = true
+            }
+        }
+
+        private struct ScheduledAction {
+            let fireDate: Date
+            let work: ScheduledWork
+            let action: @MainActor () -> Void
+        }
+
+        private(set) var now: Date
+        private var scheduledActions: [ScheduledAction] = []
+
+        init(now: Date = Date(timeIntervalSinceReferenceDate: 0)) {
+            self.now = now
+        }
+
+        @discardableResult
+        func schedule(after delay: TimeInterval, action: @escaping @MainActor () -> Void) -> any GestureScheduledWork {
+            let work = ScheduledWork()
+            scheduledActions.append(
+                ScheduledAction(
+                    fireDate: now.addingTimeInterval(delay),
+                    work: work,
+                    action: action
+                )
+            )
+            return work
+        }
+
+        func advance(by delay: TimeInterval) {
+            now = now.addingTimeInterval(delay)
+            runDueActions()
+        }
+
+        private func runDueActions() {
+            while let index = nextDueActionIndex() {
+                let scheduledAction = scheduledActions.remove(at: index)
+                if !scheduledAction.work.isCancelled {
+                    scheduledAction.action()
+                }
+                scheduledActions.removeAll { $0.work.isCancelled }
+            }
+        }
+
+        private func nextDueActionIndex() -> Int? {
+            scheduledActions.indices
+                .filter { !scheduledActions[$0].work.isCancelled && scheduledActions[$0].fireDate <= now }
+                .min { scheduledActions[$0].fireDate < scheduledActions[$1].fireDate }
+        }
+    }
+
+    @MainActor
+    final class EventCollector {
+        private(set) var events: [GestureEvent] = []
+
+        func collect(from stream: AsyncStream<GestureEvent>) -> Task<Void, Never> {
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                for await event in stream {
+                    self.events.append(event)
+                }
+            }
+        }
+    }
+
     // MARK: - Helpers
 
     private func makeSwipeFrames(
@@ -60,14 +133,34 @@ struct GestureEngineTests {
         return [start, end]
     }
 
+    private func makeTapFrames(
+        fingerCount: Int,
+        startX: Float = 0.50,
+        startY: Float = 0.50,
+        endX: Float = 0.51,
+        endY: Float = 0.50
+    ) -> [[TouchPoint]] {
+        let start = (0..<fingerCount).map { i in
+            TouchPoint(identifier: i + 1, normalizedX: startX, normalizedY: startY,
+                       pressure: 0.3, state: .touching, total: 0.15, majorAxis: 12.0)
+        }
+        let end = (0..<fingerCount).map { i in
+            TouchPoint(identifier: i + 1, normalizedX: endX, normalizedY: endY,
+                       pressure: 0.3, state: .touching, total: 0.15, majorAxis: 12.0)
+        }
+        return [start, end]
+    }
+
     private func makeEngine(
         source: StubGestureSource,
-        supportedSlots: Set<GestureSlot> = Set(GestureSlot.allCases)
+        supportedSlots: Set<GestureSlot> = Set(GestureSlot.allCases),
+        scheduler: (any GestureScheduling)? = nil
     ) -> GestureEngine {
         GestureEngine(
             source: source,
             classifier: GestureClassifier(swipeThreshold: testSwipeThreshold),
-            supportedSlots: supportedSlots
+            supportedSlots: supportedSlots,
+            scheduler: scheduler
         )
     }
 
@@ -79,8 +172,12 @@ struct GestureEngineTests {
         frames: [[TouchPoint]],
         eventsStream: AsyncStream<GestureEvent>
     ) async -> [GestureEvent] {
-        for frame in frames { source.yieldFrame(frame) }
+        for frame in frames {
+            source.yieldFrame(frame)
+            await flushPipeline()
+        }
         source.yieldFrame([]) // lift — triggers classification
+        await flushPipeline()
         engine.stop()         // finishes source → pipeline exits → events finishes
 
         var collected: [GestureEvent] = []
@@ -94,6 +191,22 @@ struct GestureEngineTests {
         for _ in 0..<turns {
             await Task.yield()
         }
+    }
+
+    private func performTap(
+        source: StubGestureSource,
+        scheduler: ManualGestureScheduler,
+        frames: [[TouchPoint]],
+        contactDuration: TimeInterval = 0.05
+    ) async {
+        for frame in frames {
+            source.yieldFrame(frame)
+            await flushPipeline()
+        }
+
+        scheduler.advance(by: contactDuration)
+        source.yieldFrame([])
+        await flushPipeline()
     }
 
     // MARK: - start() lifecycle (non-throwing, CRIT-02)
@@ -298,10 +411,285 @@ struct GestureEngineTests {
 
         for frame in frames { source.yieldFrame(frame) }
         source.yieldFrame([])
+        await flushPipeline()
         engine.stop()
 
         let received = await collector.value
         #expect(received.map(\.slot) == [.threeFingerSwipeRight, .threeFingerSwipeRight])
+    }
+
+    @Test func tapEmitsImmediatelyWhenDoubleTapSlotIsInactive() async {
+        let source = StubGestureSource()
+        let scheduler = ManualGestureScheduler()
+        let engine = makeEngine(
+            source: source,
+            supportedSlots: [.threeFingerTap],
+            scheduler: scheduler
+        )
+        engine.start()
+
+        let collector = EventCollector()
+        let collectionTask = collector.collect(from: engine.events)
+
+        await performTap(
+            source: source,
+            scheduler: scheduler,
+            frames: makeTapFrames(fingerCount: 3)
+        )
+
+        #expect(collector.events.map(\.slot) == [.threeFingerTap])
+
+        engine.stop()
+        await collectionTask.value
+    }
+
+    @Test func tapWaitsForDoubleTapWindowBeforeEmittingSingleTap() async {
+        let source = StubGestureSource()
+        let scheduler = ManualGestureScheduler()
+        let engine = makeEngine(
+            source: source,
+            supportedSlots: [.threeFingerTap, .threeFingerDoubleTap],
+            scheduler: scheduler
+        )
+        engine.start()
+
+        let collector = EventCollector()
+        let collectionTask = collector.collect(from: engine.events)
+
+        await performTap(
+            source: source,
+            scheduler: scheduler,
+            frames: makeTapFrames(fingerCount: 3)
+        )
+
+        #expect(collector.events.isEmpty)
+
+        scheduler.advance(by: GestureTapSettings.doubleTapWindow - 0.01)
+        await flushPipeline()
+        #expect(collector.events.isEmpty)
+
+        scheduler.advance(by: 0.02)
+        await flushPipeline()
+        #expect(collector.events.map(\.slot) == [.threeFingerTap])
+
+        engine.stop()
+        await collectionTask.value
+    }
+
+    @Test func secondTapInsideWindowEmitsDoubleTapWithoutSingleTap() async {
+        let source = StubGestureSource()
+        let scheduler = ManualGestureScheduler()
+        let engine = makeEngine(
+            source: source,
+            supportedSlots: [.threeFingerTap, .threeFingerDoubleTap],
+            scheduler: scheduler
+        )
+        engine.start()
+
+        let collector = EventCollector()
+        let collectionTask = collector.collect(from: engine.events)
+
+        await performTap(
+            source: source,
+            scheduler: scheduler,
+            frames: makeTapFrames(fingerCount: 3)
+        )
+        #expect(collector.events.isEmpty)
+
+        scheduler.advance(by: 0.10)
+        await performTap(
+            source: source,
+            scheduler: scheduler,
+            frames: makeTapFrames(fingerCount: 3)
+        )
+
+        #expect(collector.events.map(\.slot) == [.threeFingerDoubleTap])
+
+        scheduler.advance(by: GestureTapSettings.doubleTapWindow + 0.01)
+        await flushPipeline()
+        #expect(collector.events.map(\.slot) == [.threeFingerDoubleTap])
+
+        engine.stop()
+        await collectionTask.value
+    }
+
+    @Test func fourFingerTapEmitsImmediatelyWhenDoubleTapSlotIsInactive() async {
+        let source = StubGestureSource()
+        let scheduler = ManualGestureScheduler()
+        let engine = makeEngine(
+            source: source,
+            supportedSlots: [.fourFingerTap],
+            scheduler: scheduler
+        )
+        engine.start()
+
+        let collector = EventCollector()
+        let collectionTask = collector.collect(from: engine.events)
+
+        await performTap(
+            source: source,
+            scheduler: scheduler,
+            frames: makeTapFrames(fingerCount: 4)
+        )
+
+        #expect(collector.events.map(\.slot) == [.fourFingerTap])
+
+        engine.stop()
+        await collectionTask.value
+    }
+
+    @Test func fourFingerTapWaitsForDoubleTapWindowBeforeEmittingSingleTap() async {
+        let source = StubGestureSource()
+        let scheduler = ManualGestureScheduler()
+        let engine = makeEngine(
+            source: source,
+            supportedSlots: [.fourFingerTap, .fourFingerDoubleTap],
+            scheduler: scheduler
+        )
+        engine.start()
+
+        let collector = EventCollector()
+        let collectionTask = collector.collect(from: engine.events)
+
+        await performTap(
+            source: source,
+            scheduler: scheduler,
+            frames: makeTapFrames(fingerCount: 4)
+        )
+
+        #expect(collector.events.isEmpty)
+
+        scheduler.advance(by: GestureTapSettings.doubleTapWindow + 0.01)
+        await flushPipeline()
+        #expect(collector.events.map(\.slot) == [.fourFingerTap])
+
+        engine.stop()
+        await collectionTask.value
+    }
+
+    @Test func fourFingerSecondTapInsideWindowEmitsDoubleTapWithoutSingleTap() async {
+        let source = StubGestureSource()
+        let scheduler = ManualGestureScheduler()
+        let engine = makeEngine(
+            source: source,
+            supportedSlots: [.fourFingerTap, .fourFingerDoubleTap],
+            scheduler: scheduler
+        )
+        engine.start()
+
+        let collector = EventCollector()
+        let collectionTask = collector.collect(from: engine.events)
+
+        await performTap(
+            source: source,
+            scheduler: scheduler,
+            frames: makeTapFrames(fingerCount: 4)
+        )
+        scheduler.advance(by: 0.10)
+        await performTap(
+            source: source,
+            scheduler: scheduler,
+            frames: makeTapFrames(fingerCount: 4)
+        )
+
+        #expect(collector.events.map(\.slot) == [.fourFingerDoubleTap])
+
+        engine.stop()
+        await collectionTask.value
+    }
+
+    @Test func doubleTapOnlyConfigurationDropsSingleTap() async {
+        let source = StubGestureSource()
+        let scheduler = ManualGestureScheduler()
+        let engine = makeEngine(
+            source: source,
+            supportedSlots: [.threeFingerDoubleTap],
+            scheduler: scheduler
+        )
+        engine.start()
+
+        let collector = EventCollector()
+        let collectionTask = collector.collect(from: engine.events)
+
+        await performTap(
+            source: source,
+            scheduler: scheduler,
+            frames: makeTapFrames(fingerCount: 3)
+        )
+
+        scheduler.advance(by: GestureTapSettings.doubleTapWindow + 0.01)
+        await flushPipeline()
+        #expect(collector.events.isEmpty)
+
+        await performTap(
+            source: source,
+            scheduler: scheduler,
+            frames: makeTapFrames(fingerCount: 3)
+        )
+        scheduler.advance(by: 0.10)
+        await performTap(
+            source: source,
+            scheduler: scheduler,
+            frames: makeTapFrames(fingerCount: 3)
+        )
+
+        #expect(collector.events.map(\.slot) == [.threeFingerDoubleTap])
+
+        engine.stop()
+        await collectionTask.value
+    }
+
+    @Test func tapDoesNotEmitWhenTravelExceedsThreshold() async {
+        let source = StubGestureSource()
+        let scheduler = ManualGestureScheduler()
+        let engine = makeEngine(
+            source: source,
+            supportedSlots: [.threeFingerTap],
+            scheduler: scheduler
+        )
+        engine.start()
+
+        let collector = EventCollector()
+        let collectionTask = collector.collect(from: engine.events)
+
+        await performTap(
+            source: source,
+            scheduler: scheduler,
+            frames: makeTapFrames(fingerCount: 3, endX: 0.60, endY: 0.50)
+        )
+
+        #expect(collector.events.isEmpty)
+
+        engine.stop()
+        await collectionTask.value
+    }
+
+    @Test func stopCancelsPendingSingleTapEmission() async {
+        let source = StubGestureSource()
+        let scheduler = ManualGestureScheduler()
+        let engine = makeEngine(
+            source: source,
+            supportedSlots: [.threeFingerTap, .threeFingerDoubleTap],
+            scheduler: scheduler
+        )
+        engine.start()
+
+        let collector = EventCollector()
+        let collectionTask = collector.collect(from: engine.events)
+
+        await performTap(
+            source: source,
+            scheduler: scheduler,
+            frames: makeTapFrames(fingerCount: 3)
+        )
+        #expect(collector.events.isEmpty)
+
+        engine.stop()
+        scheduler.advance(by: GestureTapSettings.doubleTapWindow + 0.01)
+        await flushPipeline()
+        #expect(collector.events.isEmpty)
+
+        await collectionTask.value
     }
 
     // MARK: - CRIT-01: restartability

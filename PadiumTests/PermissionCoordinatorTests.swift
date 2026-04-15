@@ -221,6 +221,24 @@ struct AppStateTests {
         #expect(runtime.stopCallCount == 0)
     }
 
+    @Test @MainActor func shortcutConfigChangeUpdatesRuntimeActiveSlots() {
+        let runtime = RecordingGestureRuntime()
+        clearAllShortcutBindings()
+        defer { clearAllShortcutBindings() }
+
+        let state = makeState(
+            checker: MockPermissionChecker(accessibility: true),
+            runtime: runtime
+        )
+        #expect(runtime.activeSlotsHistory.last == [])
+
+        let name = ShortcutRegistry.name(for: .threeFingerTap)
+        KeyboardShortcuts.setShortcut(.init(.f13, modifiers: []), for: name)
+        state.handleShortcutConfigurationChange()
+
+        #expect(runtime.activeSlotsHistory.last == [.threeFingerTap])
+    }
+
     @Test @MainActor func systemGestureNoticeReflectsConflictState() {
         let state = makeState(checker: MockPermissionChecker())
         // Notice depends on whether system gestures are actually enabled on this machine.
@@ -381,6 +399,7 @@ final class RecordingSystemGestureManager: SystemGestureManaging {
 final class RecordingGestureRuntime: GestureRuntimeControlling {
     private(set) var startCallCount = 0
     private(set) var stopCallCount = 0
+    private(set) var activeSlotsHistory: [Set<GestureSlot>] = []
     private(set) var events: AsyncStream<GestureEvent>
     private var continuation: AsyncStream<GestureEvent>.Continuation
     var lastStartError: GestureEngineError?
@@ -399,6 +418,10 @@ final class RecordingGestureRuntime: GestureRuntimeControlling {
     func stop() {
         stopCallCount += 1
         continuation.finish()
+    }
+
+    func updateActiveSlots(_ activeSlots: Set<GestureSlot>) {
+        activeSlotsHistory.append(activeSlots)
     }
 
     func yield(_ slot: GestureSlot) {
