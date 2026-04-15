@@ -4,6 +4,7 @@ import Testing
 // Tests for GestureEngine — lifecycle, policy filtering, and event pipeline.
 @MainActor
 struct GestureEngineTests {
+    private let testSwipeThreshold: Float = 0.10
 
     // MARK: - Stub source
 
@@ -59,6 +60,17 @@ struct GestureEngineTests {
         return [start, end]
     }
 
+    private func makeEngine(
+        source: StubGestureSource,
+        supportedSlots: Set<GestureSlot> = Set(GestureSlot.allCases)
+    ) -> GestureEngine {
+        GestureEngine(
+            source: source,
+            classifier: GestureClassifier(swipeThreshold: testSwipeThreshold),
+            supportedSlots: supportedSlots
+        )
+    }
+
     // Deterministic collection: yields frames + lift, stops the engine, then
     // drains the passed-in stream (which terminates when the pipeline task exits).
     private func driveAndCollect(
@@ -78,11 +90,17 @@ struct GestureEngineTests {
         return collected
     }
 
+    private func flushPipeline(turns: Int = 40) async {
+        for _ in 0..<turns {
+            await Task.yield()
+        }
+    }
+
     // MARK: - start() lifecycle (non-throwing, CRIT-02)
 
     @Test func startReturnsTrueWhenSourceSucceeds() {
         let source = StubGestureSource()
-        let engine = GestureEngine(source: source, supportedSlots: Set(GestureSlot.allCases))
+        let engine = makeEngine(source: source)
         let result = engine.start()
         #expect(result == true)
         #expect(source.startCallCount == 1)
@@ -92,7 +110,7 @@ struct GestureEngineTests {
     @Test func startReturnsFalseWhenSourceFails() {
         let source = StubGestureSource()
         source.startShouldSucceed = false
-        let engine = GestureEngine(source: source, supportedSlots: Set(GestureSlot.allCases))
+        let engine = makeEngine(source: source)
         let result = engine.start()
         #expect(result == false)
     }
@@ -100,7 +118,7 @@ struct GestureEngineTests {
     @Test func lastStartErrorIsSetWithUnderlyingCauseOnFailure() {
         let source = StubGestureSource()
         source.startShouldSucceed = false
-        let engine = GestureEngine(source: source, supportedSlots: Set(GestureSlot.allCases))
+        let engine = makeEngine(source: source)
         _ = engine.start()
         guard case .sourceUnavailable(let underlying) = engine.lastStartError else {
             Issue.record("Expected lastStartError to be .sourceUnavailable")
@@ -113,7 +131,7 @@ struct GestureEngineTests {
         let source = StubGestureSource()
         // First call fails, setting lastStartError.
         source.startShouldSucceed = false
-        let engine = GestureEngine(source: source, supportedSlots: Set(GestureSlot.allCases))
+        let engine = makeEngine(source: source)
         _ = engine.start()
         #expect(engine.lastStartError != nil)
 
@@ -125,7 +143,7 @@ struct GestureEngineTests {
 
     @Test func stopDelegatesToSource() {
         let source = StubGestureSource()
-        let engine = GestureEngine(source: source, supportedSlots: Set(GestureSlot.allCases))
+        let engine = makeEngine(source: source)
         engine.start()
         engine.stop()
         #expect(source.stopCallCount == 1)
@@ -133,7 +151,7 @@ struct GestureEngineTests {
 
     @Test func doubleStartReturnsFalse() {
         let source = StubGestureSource()
-        let engine = GestureEngine(source: source, supportedSlots: Set(GestureSlot.allCases))
+        let engine = makeEngine(source: source)
         engine.start()
         let second = engine.start()
         #expect(second == false)
@@ -144,7 +162,7 @@ struct GestureEngineTests {
 
     @Test func eventsStreamEmitsClassifiedGesture() async {
         let source = StubGestureSource()
-        let engine = GestureEngine(source: source, supportedSlots: Set(GestureSlot.allCases))
+        let engine = makeEngine(source: source)
         engine.start()
         let eventsStream = engine.events
 
@@ -158,7 +176,7 @@ struct GestureEngineTests {
 
     @Test func eventsStreamDoesNotEmitForSubthresholdMovement() async {
         let source = StubGestureSource()
-        let engine = GestureEngine(source: source, supportedSlots: Set(GestureSlot.allCases))
+        let engine = makeEngine(source: source)
         engine.start()
         let eventsStream = engine.events
 
@@ -178,7 +196,7 @@ struct GestureEngineTests {
                 .supportedGestures
                 .compactMap(GestureSlot.init(rawValue:))
         )
-        let engine = GestureEngine(source: source, supportedSlots: injectedSlots)
+        let engine = makeEngine(source: source, supportedSlots: injectedSlots)
         let policySlots = Set(
             PreemptionController().currentPolicy()
                 .supportedGestures
@@ -193,7 +211,7 @@ struct GestureEngineTests {
     @Test func engineSuppressesSlotNotInSupportedSet() async {
         let source = StubGestureSource()
         let fourFingerOnly = Set(GestureSlot.allCases.filter { $0.rawValue.hasPrefix("fourFinger") })
-        let engine = GestureEngine(source: source, supportedSlots: fourFingerOnly)
+        let engine = makeEngine(source: source, supportedSlots: fourFingerOnly)
         engine.start()
         let eventsStream = engine.events
 
@@ -208,7 +226,7 @@ struct GestureEngineTests {
     @Test func engineEmitsSlotInSupportedSet() async {
         let source = StubGestureSource()
         let fourFingerOnly = Set(GestureSlot.allCases.filter { $0.rawValue.hasPrefix("fourFinger") })
-        let engine = GestureEngine(source: source, supportedSlots: fourFingerOnly)
+        let engine = makeEngine(source: source, supportedSlots: fourFingerOnly)
         engine.start()
         let eventsStream = engine.events
 
@@ -221,11 +239,76 @@ struct GestureEngineTests {
         #expect(received.first?.slot == .fourFingerSwipeRight)
     }
 
+    @Test func idChurnBeforeCommitResetsGestureCandidate() async {
+        let source = StubGestureSource()
+        let engine = makeEngine(source: source)
+        engine.start()
+        let eventsStream = engine.events
+
+        let first = [
+            TouchPoint(identifier: 1, normalizedX: 0.10, normalizedY: 0.40, pressure: 0.3, state: .touching, total: 0.15, majorAxis: 12.0),
+            TouchPoint(identifier: 2, normalizedX: 0.30, normalizedY: 0.40, pressure: 0.3, state: .touching, total: 0.15, majorAxis: 12.0),
+            TouchPoint(identifier: 3, normalizedX: 0.50, normalizedY: 0.40, pressure: 0.3, state: .touching, total: 0.15, majorAxis: 12.0)
+        ]
+        let churned = [
+            TouchPoint(identifier: 1, normalizedX: 0.24, normalizedY: 0.40, pressure: 0.3, state: .touching, total: 0.15, majorAxis: 12.0),
+            TouchPoint(identifier: 2, normalizedX: 0.44, normalizedY: 0.40, pressure: 0.3, state: .touching, total: 0.15, majorAxis: 12.0),
+            TouchPoint(identifier: 4, normalizedX: 0.64, normalizedY: 0.40, pressure: 0.3, state: .touching, total: 0.15, majorAxis: 12.0)
+        ]
+        let followUp = [
+            TouchPoint(identifier: 1, normalizedX: 0.25, normalizedY: 0.40, pressure: 0.3, state: .touching, total: 0.15, majorAxis: 12.0),
+            TouchPoint(identifier: 2, normalizedX: 0.45, normalizedY: 0.40, pressure: 0.3, state: .touching, total: 0.15, majorAxis: 12.0),
+            TouchPoint(identifier: 4, normalizedX: 0.65, normalizedY: 0.40, pressure: 0.3, state: .touching, total: 0.15, majorAxis: 12.0)
+        ]
+
+        let received = await driveAndCollect(
+            engine: engine,
+            source: source,
+            frames: [first, churned, followUp],
+            eventsStream: eventsStream
+        )
+
+        #expect(received.isEmpty)
+    }
+
+    @Test func engineSuppressesDuplicateFramesUntilLift() async {
+        let source = StubGestureSource()
+        let engine = makeEngine(source: source)
+        engine.start()
+        let eventsStream = engine.events
+
+        let collector = Task {
+            var collected: [GestureEvent] = []
+            for await event in eventsStream {
+                collected.append(event)
+            }
+            return collected
+        }
+
+        let frames = makeSwipeFrames(fingerCount: 3, startX: 0.1, startY: 0.5, endX: 0.9, endY: 0.5)
+
+        for frame in frames { source.yieldFrame(frame) }
+        await flushPipeline()
+
+        for frame in frames { source.yieldFrame(frame) }
+        await flushPipeline()
+
+        source.yieldFrame([])
+        await flushPipeline()
+
+        for frame in frames { source.yieldFrame(frame) }
+        source.yieldFrame([])
+        engine.stop()
+
+        let received = await collector.value
+        #expect(received.map(\.slot) == [.threeFingerSwipeRight, .threeFingerSwipeRight])
+    }
+
     // MARK: - CRIT-01: restartability
 
     @Test func engineCanRestartAfterStop() async {
         let source = StubGestureSource()
-        let engine = GestureEngine(source: source, supportedSlots: Set(GestureSlot.allCases))
+        let engine = makeEngine(source: source)
 
         engine.start()
         let firstStream = engine.events

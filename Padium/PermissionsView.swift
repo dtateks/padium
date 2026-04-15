@@ -3,8 +3,7 @@ import SwiftUI
 struct PermissionsView: View {
     let permissionState: PermissionState
     let systemGestureNotice: String?
-    let onOpenAccessibility: () -> Void
-    let onOpenInputMonitoring: () -> Void
+    let onRequestAccessibility: () -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -17,26 +16,20 @@ struct PermissionsView: View {
                     .foregroundStyle(.secondary)
 
             case .granted:
-                Label("All permissions granted", systemImage: "checkmark.circle.fill")
+                Label("Accessibility granted", systemImage: "checkmark.circle.fill")
                     .foregroundStyle(.green)
 
-            case let .denied(accessibility, inputMonitoring):
-                if !accessibility {
-                    permissionRow(
-                        title: "Accessibility",
-                        description: "Required to emit keyboard shortcuts.",
-                        action: "Open Accessibility Settings",
-                        onAction: onOpenAccessibility
-                    )
-                }
-
-                if !inputMonitoring {
-                    permissionRow(
-                        title: "Input Monitoring",
-                        description: "Required to read trackpad gestures.",
-                        action: "Open Input Monitoring Settings",
-                        onAction: onOpenInputMonitoring
-                    )
+            case .denied:
+                VStack(alignment: .leading, spacing: 4) {
+                    Label("Accessibility", systemImage: "xmark.circle.fill")
+                        .foregroundStyle(.red)
+                    Text("Required to emit keyboard shortcuts.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Button("Grant Accessibility Permission") {
+                        onRequestAccessibility()
+                    }
+                    .buttonStyle(.link)
                 }
             }
 
@@ -54,17 +47,5 @@ struct PermissionsView: View {
         }
         .padding()
         .frame(width: 360)
-    }
-
-    private func permissionRow(title: String, description: String, action: String, onAction: @escaping () -> Void) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Label(title, systemImage: "xmark.circle.fill")
-                .foregroundStyle(.red)
-            Text(description)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-            Button(action) { onAction() }
-                .buttonStyle(.link)
-        }
     }
 }

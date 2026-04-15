@@ -1,5 +1,6 @@
 import Testing
 @testable import Padium
+import Carbon
 import KeyboardShortcuts
 
 // A test double that records whether a shortcut send was attempted.
@@ -49,5 +50,30 @@ struct ShortcutEmitterTests {
             #expect(result == false)
         }
         #expect(sender.sentShortcuts.isEmpty)
+    }
+
+    @Test func shortcutEventSequenceWrapsMainKeyWithModifierTransitions() {
+        let shortcut = KeyboardShortcuts.Shortcut(.k, modifiers: [.command, .shift])
+        let steps = ShortcutEventSequence.steps(for: shortcut)
+
+        #expect(steps.map(\.keyCode) == [
+            CGKeyCode(kVK_Command),
+            CGKeyCode(kVK_Shift),
+            CGKeyCode(shortcut.carbonKeyCode),
+            CGKeyCode(shortcut.carbonKeyCode),
+            CGKeyCode(kVK_Shift),
+            CGKeyCode(kVK_Command)
+        ])
+        #expect(steps.map(\.isKeyDown) == [true, true, true, false, false, false])
+    }
+
+    @Test func shortcutEventSequenceWithoutModifiersUsesMainKeyOnly() {
+        let shortcut = KeyboardShortcuts.Shortcut(.f13, modifiers: [])
+        let steps = ShortcutEventSequence.steps(for: shortcut)
+
+        #expect(steps == [
+            ShortcutEventStep(keyCode: CGKeyCode(shortcut.carbonKeyCode), isKeyDown: true, flags: []),
+            ShortcutEventStep(keyCode: CGKeyCode(shortcut.carbonKeyCode), isKeyDown: false, flags: [])
+        ])
     }
 }

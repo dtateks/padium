@@ -1,18 +1,17 @@
 import AppKit
 import ApplicationServices
-import CoreGraphics
 import Foundation
 import os
 
 enum PermissionState: Equatable, Sendable {
     case checking
     case granted
-    case denied(accessibility: Bool, inputMonitoring: Bool)
+    case denied
 }
 
 protocol PermissionChecking {
     func isAccessibilityGranted() -> Bool
-    func isInputMonitoringGranted() -> Bool
+    func requestAccessibility()
 }
 
 struct SystemPermissionChecker: PermissionChecking {
@@ -20,8 +19,9 @@ struct SystemPermissionChecker: PermissionChecking {
         AXIsProcessTrusted()
     }
 
-    func isInputMonitoringGranted() -> Bool {
-        CGPreflightListenEventAccess()
+    func requestAccessibility() {
+        let options = ["AXTrustedCheckOptionPrompt": true] as CFDictionary
+        AXIsProcessTrustedWithOptions(options)
     }
 }
 
@@ -29,6 +29,7 @@ struct SystemPermissionChecker: PermissionChecking {
 final class PermissionCoordinator {
     private(set) var permissionState: PermissionState = .checking
     private let checker: PermissionChecking
+    private var pollTimer: Timer?
 
     init(checker: PermissionChecking = SystemPermissionChecker()) {
         self.checker = checker
@@ -40,24 +41,27 @@ final class PermissionCoordinator {
 
     func checkPermissions() {
         let accessibility = checker.isAccessibilityGranted()
-        let inputMonitoring = checker.isInputMonitoringGranted()
+        permissionState = accessibility ? .granted : .denied
+        PadiumLogger.permission.info("Permission check: accessibility=\(accessibility)")
+    }
 
-        if accessibility && inputMonitoring {
-            permissionState = .granted
-        } else {
-            permissionState = .denied(accessibility: accessibility, inputMonitoring: inputMonitoring)
+    /// Start polling AXIsProcessTrusted every 2s so UI updates after user grants in System Settings.
+    func startPolling(onUpdate: @escaping @MainActor () -> Void) {
+        guard pollTimer == nil else { return }
+        pollTimer = Timer.scheduledTimer(withTimeInterval: 2.0, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard self != nil else { return }
+                onUpdate()
+            }
         }
-
-        PadiumLogger.permission.info("Permission check: accessibility=\(accessibility) inputMonitoring=\(inputMonitoring)")
     }
 
-    func openAccessibilitySettings() {
-        let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility")!
-        NSWorkspace.shared.open(url)
+    func stopPolling() {
+        pollTimer?.invalidate()
+        pollTimer = nil
     }
 
-    func openInputMonitoringSettings() {
-        let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_ListenEvent")!
-        NSWorkspace.shared.open(url)
+    func requestAccessibility() {
+        checker.requestAccessibility()
     }
 }

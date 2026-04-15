@@ -1,22 +1,50 @@
 import Foundation
 
-// Classifies raw touch-frame sequences into GestureEvents.
-//
-// Thresholds derived from spikes-oms.md §5 (research candidates; confirmed on
-// owner machine for swipe minimum distance via preemption spike):
-//   - swipeMinDistance  ≥ 0.10 normalized (§5.3)
-//   - noiseCapacitance  < 0.03 total       (§5.6)
-//   - palmMajorAxis     > 30 sensor units  (§5.6)
-//
-// Supported gesture set: 8 swipe slots only (3- and 4-finger, 4 directions).
-// Tap / double-tap support is excluded — spikes-preemption.md §4 confirms that
-// GestureSlot is swipe-only and older tap planning docs are stale.
+enum GestureSensitivitySetting {
+    static let minimumValue: Double = 0.0
+    static let defaultValue: Double = 0.5
+    static let maximumValue: Double = 1.0
+
+    private static let userDefaultsKey = "gesture.sensitivity"
+    private static let minimumSwipeThreshold: Float = 0.06
+    private static let maximumSwipeThreshold: Float = 0.14
+
+    static func clamp(_ value: Double) -> Double {
+        min(max(value, minimumValue), maximumValue)
+    }
+
+    static func storedValue(userDefaults: UserDefaults = .standard) -> Double {
+        let value = userDefaults.object(forKey: userDefaultsKey) as? Double ?? defaultValue
+        return clamp(value)
+    }
+
+    static func store(_ value: Double, userDefaults: UserDefaults = .standard) {
+        userDefaults.set(clamp(value), forKey: userDefaultsKey)
+    }
+
+    static func swipeThreshold(for sensitivity: Double) -> Float {
+        let progress = Float(clamp(sensitivity))
+        let range = maximumSwipeThreshold - minimumSwipeThreshold
+        return maximumSwipeThreshold - (range * progress)
+    }
+
+    static func currentSwipeThreshold(userDefaults: UserDefaults = .standard) -> Float {
+        swipeThreshold(for: storedValue(userDefaults: userDefaults))
+    }
+}
+
+// Classifies raw touch-frame sequences into swipe events using stable touch IDs,
+// dominant-axis commitment, and per-finger direction agreement.
 struct GestureClassifier: Sendable {
 
-    // MARK: - Thresholds (named constants from spike evidence)
+    // Minimum normalized distance to register as a swipe.
+    private let swipeThreshold: Float
 
-    // Minimum normalized distance across the trackpad to register as a swipe.
-    private static let swipeMinDistance: Float = 0.10
+    // Dominant axis must clearly outweigh the cross axis before direction locks.
+    private static let axisDominanceRatio: Float = 1.2
+
+    // A finger may jitter slightly against the committed direction without invalidating the swipe.
+    private static let perFingerDirectionTolerance: Float = 0.015
 
     // Contacts with total capacitance below this value are noise.
     private static let noiseCapacitanceThreshold: Float = 0.03
@@ -24,116 +52,151 @@ struct GestureClassifier: Sendable {
     // Contacts with a major ellipse axis above this are likely a palm.
     private static let palmMajorAxisThreshold: Float = 30.0
 
-    // MARK: - Classification
+    init(swipeThreshold: Float = GestureSensitivitySetting.currentSwipeThreshold()) {
+        self.swipeThreshold = swipeThreshold
+    }
 
-    func classify(frames: [[TouchPoint]]) -> GestureEvent? {
-        guard frames.count >= 2 else { return nil }
-
-        // Collect frames that contain at least one stable (non-noise) contact.
-        let stableFrames = frames.filter { isStableFrame($0) }
-        guard stableFrames.count >= 2 else { return nil }
-
+    /// Try to classify incrementally: given first stable frame and current frame,
+    /// return a GestureEvent if displacement is sufficient. Returns nil if not yet a swipe.
+    func classifyIncremental(
+        firstFrame: [TouchPoint],
+        currentFrame: [TouchPoint],
+        peakFingerCount: Int
+    ) -> GestureEvent? {
         guard
-            let firstStable = stableFrames.first,
-            let lastStable  = stableFrames.last
+            let firstContacts = stableActiveContacts(in: firstFrame, expectedFingerCount: peakFingerCount),
+            let currentContacts = stableActiveContacts(in: currentFrame, expectedFingerCount: peakFingerCount)
         else { return nil }
 
-        let fingerCount = stableFingerCount(in: stableFrames)
-        guard fingerCount == 3 || fingerCount == 4 else { return nil }
+        return classifyIncremental(
+            firstContacts: firstContacts,
+            currentContacts: currentContacts,
+            peakFingerCount: peakFingerCount
+        )
+    }
 
-        // Use centroid of first and last stable frames for direction.
-        guard
-            let startCentroid = centroid(of: firstStable),
-            let endCentroid   = centroid(of: lastStable)
-        else { return nil }
+    func classifyIncremental(
+        firstContacts: [Int: TouchPoint],
+        currentContacts: [Int: TouchPoint],
+        peakFingerCount: Int
+    ) -> GestureEvent? {
+        guard peakFingerCount == 3 || peakFingerCount == 4 else { return nil }
+        guard firstContacts.count == peakFingerCount, currentContacts.count == peakFingerCount else { return nil }
+        guard Set(firstContacts.keys) == Set(currentContacts.keys) else { return nil }
 
-        let dx = endCentroid.x - startCentroid.x
-        let dy = endCentroid.y - startCentroid.y
-        let distance = (dx * dx + dy * dy).squareRoot()
+        let displacements = firstContacts.compactMap { identifier, startPoint in
+            currentContacts[identifier].map { currentPoint in
+                (
+                    dx: currentPoint.normalizedX - startPoint.normalizedX,
+                    dy: currentPoint.normalizedY - startPoint.normalizedY
+                )
+            }
+        }
+        guard displacements.count == peakFingerCount else { return nil }
 
-        guard distance >= Self.swipeMinDistance else { return nil }
+        let averageDx = displacements.reduce(0) { $0 + $1.dx } / Float(displacements.count)
+        let averageDy = displacements.reduce(0) { $0 + $1.dy } / Float(displacements.count)
+        guard let dominantAxis = dominantAxis(dx: averageDx, dy: averageDy) else { return nil }
+        let dominantDelta = dominantAxis == .horizontal ? averageDx : averageDy
+        guard abs(dominantDelta) >= swipeThreshold else { return nil }
+        guard displacements.allSatisfy({ displacementSupportsCommittedDirection($0, axis: dominantAxis, dominantDelta: dominantDelta) }) else {
+            return nil
+        }
 
-        guard let slot = swipeSlot(dx: dx, dy: dy, fingerCount: fingerCount) else { return nil }
+        guard let slot = swipeSlot(axis: dominantAxis, dominantDelta: dominantDelta, fingerCount: peakFingerCount) else {
+            return nil
+        }
         return GestureEvent(slot: slot, timestamp: Date())
     }
 
-    // MARK: - Helpers
+    // MARK: - Public helpers for engine
 
-    // A frame is stable when it is non-empty and every contact passes noise
-    // and palm guards, and at least one contact is in an active gesture state.
-    private func isStableFrame(_ frame: [TouchPoint]) -> Bool {
-        guard !frame.isEmpty else { return false }
-        let validContacts = frame.filter { isValidContact($0) }
-        guard !validContacts.isEmpty else { return false }
-        return validContacts.contains { isActiveState($0.state) }
+    func isStableFrame(_ frame: [TouchPoint]) -> Bool {
+        stableActiveContacts(in: frame) != nil
     }
+
+    func activeFingerCount(in frame: [TouchPoint]) -> Int {
+        stableActiveContacts(in: frame)?.count ?? 0
+    }
+
+    func stableActiveContacts(
+        in frame: [TouchPoint],
+        expectedFingerCount: Int? = nil
+    ) -> [Int: TouchPoint]? {
+        guard !frame.isEmpty else { return nil }
+        let activeContacts = frame.filter { isValidContact($0) && isActiveState($0.state) }
+        guard !activeContacts.isEmpty else { return nil }
+        if let expectedFingerCount, activeContacts.count != expectedFingerCount {
+            return nil
+        }
+
+        var contactsByIdentifier: [Int: TouchPoint] = [:]
+        contactsByIdentifier.reserveCapacity(activeContacts.count)
+        for contact in activeContacts {
+            guard contactsByIdentifier.updateValue(contact, forKey: contact.identifier) == nil else {
+                return nil
+            }
+        }
+        return contactsByIdentifier
+    }
+
+    // MARK: - Internal
 
     private func isValidContact(_ point: TouchPoint) -> Bool {
         point.total >= Self.noiseCapacitanceThreshold &&
         point.majorAxis <= Self.palmMajorAxisThreshold
     }
 
-    // States used for position tracking. Hovering and notTouching are excluded.
     private func isActiveState(_ state: OMSTouchState) -> Bool {
         switch state {
-        case .touching, .lingering, .breaking, .making, .starting:
+        case .touching, .lingering, .breaking, .making:
             return true
-        case .hovering, .notTouching, .leaving:
+        case .starting, .hovering, .notTouching, .leaving:
             return false
         }
     }
 
-    // The stable finger count is the maximum number of valid active contacts
-    // observed across all stable frames. Using the maximum avoids under-counting
-    // during finger-stagger while still settling on the peak plateau.
-    private func stableFingerCount(in frames: [[TouchPoint]]) -> Int {
-        frames.map { frame in
-            frame.filter { isValidContact($0) && isActiveState($0.state) }.count
-        }.max() ?? 0
-    }
-
-    // Average position of valid active contacts in a frame.
-    private func centroid(of frame: [TouchPoint]) -> (x: Float, y: Float)? {
-        let active = frame.filter { isValidContact($0) && isActiveState($0.state) }
-        guard !active.isEmpty else { return nil }
-        let sumX = active.reduce(0) { $0 + $1.normalizedX }
-        let sumY = active.reduce(0) { $0 + $1.normalizedY }
-        let n = Float(active.count)
-        return (x: sumX / n, y: sumY / n)
-    }
-
-    // Maps a displacement vector to a cardinal-direction swipe slot.
-    // Uses ±45° sector boundaries (atan2-based quadrant classification).
-    private func swipeSlot(dx: Float, dy: Float, fingerCount: Int) -> GestureSlot? {
-        let angle = atan2(dy, dx)
-        let pi = Float.pi
-        // Sector boundaries at ±π/4 and ±3π/4
-        let slot45 = pi / 4
-        let slot135 = 3 * pi / 4
-
-        let direction: SwipeDirection
-        if angle >= -slot45 && angle < slot45 {
-            direction = .right
-        } else if angle >= slot45 && angle < slot135 {
-            direction = .up
-        } else if angle >= slot135 || angle < -slot135 {
-            direction = .left
-        } else {
-            direction = .down
+    private func dominantAxis(dx: Float, dy: Float) -> SwipeAxis? {
+        let absDx = abs(dx)
+        let absDy = abs(dy)
+        if absDx >= absDy * Self.axisDominanceRatio {
+            return .horizontal
         }
+        if absDy >= absDx * Self.axisDominanceRatio {
+            return .vertical
+        }
+        return nil
+    }
 
-        switch (fingerCount, direction) {
-        case (3, .left):  return .threeFingerSwipeLeft
-        case (3, .right): return .threeFingerSwipeRight
-        case (3, .up):    return .threeFingerSwipeUp
-        case (3, .down):  return .threeFingerSwipeDown
-        case (4, .left):  return .fourFingerSwipeLeft
-        case (4, .right): return .fourFingerSwipeRight
-        case (4, .up):    return .fourFingerSwipeUp
-        case (4, .down):  return .fourFingerSwipeDown
-        default:          return nil
+    private func displacementSupportsCommittedDirection(
+        _ displacement: (dx: Float, dy: Float),
+        axis: SwipeAxis,
+        dominantDelta: Float
+    ) -> Bool {
+        let dominantComponent = axis == .horizontal ? displacement.dx : displacement.dy
+        let sameDirection = dominantDelta >= 0
+            ? dominantComponent >= -Self.perFingerDirectionTolerance
+            : dominantComponent <= Self.perFingerDirectionTolerance
+        let movedEnough = abs(dominantComponent) >= Self.perFingerDirectionTolerance
+
+        return sameDirection && movedEnough
+    }
+
+    private func swipeSlot(axis: SwipeAxis, dominantDelta: Float, fingerCount: Int) -> GestureSlot? {
+        let isPositiveDirection = dominantDelta >= 0
+
+        switch (fingerCount, axis, isPositiveDirection) {
+        case (3, .horizontal, false): return .threeFingerSwipeLeft
+        case (3, .horizontal, true):  return .threeFingerSwipeRight
+        case (3, .vertical, true):    return .threeFingerSwipeUp
+        case (3, .vertical, false):   return .threeFingerSwipeDown
+        case (4, .horizontal, false): return .fourFingerSwipeLeft
+        case (4, .horizontal, true):  return .fourFingerSwipeRight
+        case (4, .vertical, true):    return .fourFingerSwipeUp
+        case (4, .vertical, false):   return .fourFingerSwipeDown
+        default:                      return nil
         }
     }
 
-    private enum SwipeDirection { case left, right, up, down }
+    private enum SwipeAxis { case horizontal, vertical }
 }

@@ -2,7 +2,21 @@ import SwiftUI
 
 @main
 struct PadiumApp: App {
-    @State private var appState = AppState()
+    @State private var appState: AppState
+
+    init() {
+        let state = AppState()
+        if !Self.isRunningUnderTestHarness {
+            state.handleAppLaunch {
+                NSApp.terminate(nil)
+            }
+        }
+        _appState = State(initialValue: state)
+    }
+
+    private static var isRunningUnderTestHarness: Bool {
+        ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil
+    }
 
     var body: some Scene {
         MenuBarExtra("Padium", systemImage: "hand.tap") {
@@ -20,48 +34,69 @@ struct MenuBarContentView: View {
     @Bindable var appState: AppState
     @Environment(\.openWindow) private var openWindow
 
+    private let settingsWindowTitle = "Padium Settings"
+
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Toggle("Enabled", isOn: $appState.isEnabled)
-                .disabled(!appState.permissionState.isGranted)
-
-            Divider()
-
-            if !appState.permissionState.isGranted {
-                Label("Permissions required", systemImage: "exclamationmark.triangle")
+            if appState.isRunning {
+                Label("Running", systemImage: "checkmark.circle.fill")
+                    .foregroundStyle(.green)
+                    .font(.caption)
+            } else if appState.permissionState == .denied {
+                Label("Accessibility required", systemImage: "exclamationmark.triangle")
                     .foregroundStyle(.orange)
                     .font(.caption)
             }
 
-            Button("Settings…") {
-                appState.isSettingsPresented = true
+            Button("Settings…", action: presentSettingsWindow)
+
+            Divider()
+
+            Button("Quit") {
+                NSApp.terminate(nil)
             }
         }
         .padding(8)
-        .onChange(of: appState.isSettingsPresented) { _, presented in
-            if presented {
-                openWindow(id: "settings")
-                NSApp.activate(ignoringOtherApps: true)
-            }
-        }
         .onAppear {
             appState.refreshPermissions()
         }
+    }
+
+    private func presentSettingsWindow() {
+        appState.isSettingsPresented = true
+        openWindow(id: "settings")
+        NSApp.activate(ignoringOtherApps: true)
+
+        Task { @MainActor in
+            for _ in 0..<3 {
+                if focusSettingsWindow() {
+                    return
+                }
+                await Task.yield()
+            }
+        }
+    }
+
+    private func focusSettingsWindow() -> Bool {
+        guard let window = NSApp.windows.first(where: { $0.title == settingsWindowTitle }) else {
+            return false
+        }
+
+        window.makeKeyAndOrderFront(nil)
+        window.orderFrontRegardless()
+        return true
     }
 }
 
 struct SettingsContentView: View {
     @Bindable var appState: AppState
 
-    private let coordinator = PermissionCoordinator()
-
     var body: some View {
         TabView {
             PermissionsView(
                 permissionState: appState.permissionState,
                 systemGestureNotice: appState.systemGestureNotice,
-                onOpenAccessibility: { coordinator.openAccessibilitySettings() },
-                onOpenInputMonitoring: { coordinator.openInputMonitoringSettings() }
+                onRequestAccessibility: { appState.requestAccessibility() }
             )
             .tabItem { Label("Permissions", systemImage: "lock.shield") }
 
@@ -72,11 +107,5 @@ struct SettingsContentView: View {
         .onDisappear {
             appState.isSettingsPresented = false
         }
-    }
-}
-
-private extension PermissionState {
-    var isGranted: Bool {
-        self == .granted
     }
 }

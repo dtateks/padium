@@ -21,15 +21,20 @@ final class OMSGestureSource: GestureSource, @unchecked Sendable {
     func startListening() throws {
         let started = OMSManager.shared.startListening()
         guard started else {
+            PadiumLogger.gesture.error("OMS listener failed to start")
             throw OMSGestureSourceError.listenerAlreadyActiveOrHardwareUnavailable
         }
-        // Replace stream+continuation so consumers on a restarted engine get a
-        // fresh, non-finished stream. The previous continuation is already finished
-        // by the preceding stopListening() call.
+
+        PadiumLogger.gesture.info("OMS listener started")
         (stream, continuation) = AsyncStream<[TouchPoint]>.makeStream()
         let activeContinuation = continuation
         omsTask = Task {
+            var frameCount = 0
             for await omsTouches in OMSManager.shared.touchDataStream {
+                frameCount += 1
+                if frameCount <= 5 || frameCount % 100 == 0 {
+                    PadiumLogger.gesture.debug("OMS frame \(frameCount, privacy: .public): \(omsTouches.count, privacy: .public) touches")
+                }
                 let points = omsTouches.map { t in
                     TouchPoint(
                         identifier: Int(t.id),
@@ -51,6 +56,7 @@ final class OMSGestureSource: GestureSource, @unchecked Sendable {
         omsTask?.cancel()
         omsTask = nil
         continuation.finish()
+        PadiumLogger.gesture.info("OMS listener stopped")
     }
 }
 

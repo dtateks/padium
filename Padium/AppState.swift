@@ -1,3 +1,4 @@
+import ApplicationServices
 import Foundation
 import os
 
@@ -19,25 +20,11 @@ extension ShortcutEmitter: ShortcutEmitting {}
 
 @MainActor @Observable
 final class AppState {
-    var isEnabled: Bool = false {
-        didSet {
-            if isEnabled && !coordinator.isFullyGranted {
-                PadiumLogger.permission.warning("Enable blocked — permissions not granted")
-                isEnabled = false
-                return
-            }
-
-            if isEnabled {
-                startRuntimeIfNeeded()
-            } else {
-                stopRuntime()
-            }
-        }
-    }
-
     var permissionState: PermissionState { coordinator.permissionState }
+    var isRunning: Bool { runtimeTask != nil }
     var systemGestureNotice: String?
     let supportedGestureSlots: [GestureSlot]
+    var gestureSensitivity: Double
     var isSettingsPresented: Bool = false
 
     private let coordinator: PermissionCoordinator
@@ -57,6 +44,7 @@ final class AppState {
         let supportedGestureSlots = Self.resolveSupportedGestureSlots(from: policy)
         self.systemGestureNotice = policy.ownerNotice
         self.supportedGestureSlots = supportedGestureSlots
+        self.gestureSensitivity = GestureSensitivitySetting.storedValue()
 
         if let gestureEngine {
             self.gestureEngine = gestureEngine
@@ -67,17 +55,55 @@ final class AppState {
         self.shortcutEmitter = shortcutEmitter ?? ShortcutEmitter()
     }
 
+    /// Check permissions and auto-start runtime if granted.
     func refreshPermissions() {
         coordinator.checkPermissions()
 
-        if !coordinator.isFullyGranted && isEnabled {
-            PadiumLogger.permission.warning("Permissions revoked — disabling Padium")
-            isEnabled = false
-            return
-        }
-
-        if isEnabled {
+        if coordinator.isFullyGranted {
             startRuntimeIfNeeded()
+        } else {
+            stopRuntime()
+        }
+    }
+
+    func requestAccessibility() {
+        coordinator.requestAccessibility()
+    }
+
+    func handleAppLaunch(onMissingPermissions: @escaping @MainActor () -> Void) {
+        startPermissionPolling()
+        refreshPermissions()
+
+        guard !coordinator.isFullyGranted else { return }
+
+        PadiumLogger.permission.notice("Accessibility missing at launch; prompting then terminating")
+        requestAccessibility()
+        stopPermissionPolling()
+
+        Task { @MainActor in
+            await Task.yield()
+            onMissingPermissions()
+        }
+    }
+
+    func startPermissionPolling() {
+        coordinator.startPolling { [weak self] in
+            self?.refreshPermissions()
+        }
+    }
+
+    func stopPermissionPolling() {
+        coordinator.stopPolling()
+    }
+
+    func setGestureSensitivity(_ value: Double) {
+        let clamped = GestureSensitivitySetting.clamp(value)
+        guard gestureSensitivity != clamped else { return }
+        gestureSensitivity = clamped
+        GestureSensitivitySetting.store(clamped)
+
+        if isRunning {
+            restartRuntime()
         }
     }
 
@@ -86,17 +112,14 @@ final class AppState {
         guard gestureEngine.start() else {
             if let startError = gestureEngine.lastStartError {
                 PadiumLogger.gesture.error("Gesture engine failed to start: \(String(describing: startError), privacy: .public)")
-            } else {
-                PadiumLogger.gesture.error("Gesture engine failed to start without explicit error")
             }
-            isEnabled = false
             return
         }
 
         runtimeTask = Task { @MainActor [weak self] in
             guard let self else { return }
             for await event in self.gestureEngine.events {
-                guard self.isEnabled, self.coordinator.isFullyGranted else { continue }
+                guard self.coordinator.isFullyGranted else { continue }
                 _ = self.shortcutEmitter.emitConfiguredShortcut(for: event.slot)
             }
         }
@@ -106,6 +129,11 @@ final class AppState {
         gestureEngine.stop()
         runtimeTask?.cancel()
         runtimeTask = nil
+    }
+
+    private func restartRuntime() {
+        stopRuntime()
+        startRuntimeIfNeeded()
     }
 }
 

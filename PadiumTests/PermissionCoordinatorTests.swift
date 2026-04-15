@@ -2,69 +2,53 @@ import Testing
 @testable import Padium
 import Foundation
 
-// MARK: - Permission Checking Protocol for Testability
+// MARK: - PermissionCoordinator tests
 
 struct PermissionCoordinatorTests {
-
-    // MARK: - PermissionState transitions
 
     @Test @MainActor func initialPermissionStateIsChecking() {
         let coordinator = PermissionCoordinator(checker: MockPermissionChecker())
         #expect(coordinator.permissionState == .checking)
     }
 
-    @Test @MainActor func bothPermissionsGrantedTransitionsToGranted() async {
-        let checker = MockPermissionChecker(accessibility: true, inputMonitoring: true)
+    @Test @MainActor func accessibilityGrantedTransitionsToGranted() {
+        let checker = MockPermissionChecker(accessibility: true)
         let coordinator = PermissionCoordinator(checker: checker)
         coordinator.checkPermissions()
         #expect(coordinator.permissionState == .granted)
     }
 
-    @Test @MainActor func missingAccessibilityTransitionsToDenied() async {
-        let checker = MockPermissionChecker(accessibility: false, inputMonitoring: true)
+    @Test @MainActor func accessibilityDeniedTransitionsToDenied() {
+        let checker = MockPermissionChecker(accessibility: false)
         let coordinator = PermissionCoordinator(checker: checker)
         coordinator.checkPermissions()
-        #expect(coordinator.permissionState == .denied(accessibility: false, inputMonitoring: true))
+        #expect(coordinator.permissionState == .denied)
     }
 
-    @Test @MainActor func missingInputMonitoringTransitionsToDenied() async {
-        let checker = MockPermissionChecker(accessibility: true, inputMonitoring: false)
-        let coordinator = PermissionCoordinator(checker: checker)
-        coordinator.checkPermissions()
-        #expect(coordinator.permissionState == .denied(accessibility: true, inputMonitoring: false))
-    }
-
-    @Test @MainActor func bothPermissionsMissingTransitionsToDenied() async {
-        let checker = MockPermissionChecker(accessibility: false, inputMonitoring: false)
-        let coordinator = PermissionCoordinator(checker: checker)
-        coordinator.checkPermissions()
-        #expect(coordinator.permissionState == .denied(accessibility: false, inputMonitoring: false))
-    }
-
-    @Test @MainActor func permissionRevocationDetected() async {
-        let checker = MockPermissionChecker(accessibility: true, inputMonitoring: true)
+    @Test @MainActor func permissionRevocationDetected() {
+        let checker = MockPermissionChecker(accessibility: true)
         let coordinator = PermissionCoordinator(checker: checker)
         coordinator.checkPermissions()
         #expect(coordinator.permissionState == .granted)
 
         checker.accessibility = false
         coordinator.checkPermissions()
-        #expect(coordinator.permissionState == .denied(accessibility: false, inputMonitoring: true))
+        #expect(coordinator.permissionState == .denied)
     }
 
     @Test @MainActor func isFullyGrantedReturnsTrueOnlyWhenGranted() {
-        let checker = MockPermissionChecker(accessibility: true, inputMonitoring: true)
+        let checker = MockPermissionChecker(accessibility: true)
         let coordinator = PermissionCoordinator(checker: checker)
-        #expect(coordinator.isFullyGranted == false) // still .checking
+        #expect(coordinator.isFullyGranted == false)
         coordinator.checkPermissions()
         #expect(coordinator.isFullyGranted == true)
     }
 
-    @Test @MainActor func isFullyGrantedReturnsFalseWhenDenied() {
-        let checker = MockPermissionChecker(accessibility: false, inputMonitoring: false)
+    @Test @MainActor func requestAccessibilityDelegatesToChecker() {
+        let checker = MockPermissionChecker(accessibility: false)
         let coordinator = PermissionCoordinator(checker: checker)
-        coordinator.checkPermissions()
-        #expect(coordinator.isFullyGranted == false)
+        coordinator.requestAccessibility()
+        #expect(checker.requestAccessibilityCallCount == 1)
     }
 }
 
@@ -94,41 +78,45 @@ struct AppStateTests {
         }
     }
 
-    @Test @MainActor func initialStateIsDisabledWithCheckingPermissions() {
-        let checker = MockPermissionChecker()
-        let state = makeState(checker: checker)
-        #expect(state.isEnabled == false)
+    @Test @MainActor func initialStateNotRunning() {
+        let state = makeState(checker: MockPermissionChecker())
+        #expect(state.isRunning == false)
         #expect(state.permissionState == .checking)
-        #expect(state.isSettingsPresented == false)
     }
 
-    @Test @MainActor func systemGestureNoticePopulatedFromPreemptionPolicy() {
-        let checker = MockPermissionChecker()
-        let state = makeState(checker: checker)
-        // PreemptionController always produces an ownerNotice for manual-disable strategy
-        #expect(state.systemGestureNotice != nil)
+    @Test @MainActor func refreshPermissionsAutoStartsWhenGranted() async {
+        let checker = MockPermissionChecker(accessibility: true)
+        let runtime = RecordingGestureRuntime()
+        let state = makeState(checker: checker, runtime: runtime)
+        state.refreshPermissions()
+        #expect(state.isRunning == true)
+        #expect(runtime.startCallCount == 1)
     }
 
-    @Test @MainActor func supportedGestureSlotsMatchPreemptionPolicy() {
-        let checker = MockPermissionChecker()
-        let state = makeState(checker: checker)
-        let expected = PreemptionController().currentPolicy().supportedGestures.compactMap(GestureSlot.init(rawValue:))
-        #expect(state.supportedGestureSlots == expected)
+    @Test @MainActor func refreshPermissionsDoesNotStartWhenDenied() {
+        let checker = MockPermissionChecker(accessibility: false)
+        let runtime = RecordingGestureRuntime()
+        let state = makeState(checker: checker, runtime: runtime)
+        state.refreshPermissions()
+        #expect(state.isRunning == false)
+        #expect(runtime.startCallCount == 0)
     }
 
-    @Test @MainActor func unsupportedPolicyGesturesAreExcludedFromSupportedGestureSlots() {
-        let checker = MockPermissionChecker()
-        let policy = PreemptionPolicy(
-            strategy: .manualDisable,
-            supportedGestures: [GestureSlot.threeFingerSwipeLeft.rawValue, "unsupported.gesture"],
-            ownerNotice: "notice"
-        )
-        let state = makeState(checker: checker, policy: policy)
-        #expect(state.supportedGestureSlots == [.threeFingerSwipeLeft])
+    @Test @MainActor func permissionRevocationStopsRuntime() {
+        let checker = MockPermissionChecker(accessibility: true)
+        let runtime = RecordingGestureRuntime()
+        let state = makeState(checker: checker, runtime: runtime)
+        state.refreshPermissions()
+        #expect(state.isRunning == true)
+
+        checker.accessibility = false
+        state.refreshPermissions()
+        #expect(state.isRunning == false)
+        #expect(runtime.stopCallCount == 1)
     }
 
-    @Test @MainActor func runtimeEmitsConfiguredShortcutWhenEnabledAndPermissionsGranted() async {
-        let checker = MockPermissionChecker(accessibility: true, inputMonitoring: true)
+    @Test @MainActor func runtimeEmitsShortcutWhenPermissionsGranted() async {
+        let checker = MockPermissionChecker(accessibility: true)
         let runtime = RecordingGestureRuntime()
         let emitter = RecordingShortcutEmitter()
         let state = AppState(
@@ -143,103 +131,88 @@ struct AppStateTests {
         )
 
         state.refreshPermissions()
-        state.isEnabled = true
         await pumpEventLoop()
 
         runtime.yield(.threeFingerSwipeLeft)
         await pumpEventLoop()
 
-        #expect(runtime.startCallCount == 1)
         #expect(emitter.emittedSlots == [.threeFingerSwipeLeft])
     }
 
-    @Test @MainActor func runtimeDoesNotEmitShortcutAfterDisable() async {
-        let checker = MockPermissionChecker(accessibility: true, inputMonitoring: true)
-        let runtime = RecordingGestureRuntime()
-        let emitter = RecordingShortcutEmitter()
-        let state = AppState(
-            permissionChecker: checker,
-            preemptionPolicy: PreemptionPolicy(
-                strategy: .manualDisable,
-                supportedGestures: [GestureSlot.threeFingerSwipeRight.rawValue],
-                ownerNotice: nil
-            ),
-            gestureEngine: runtime,
-            shortcutEmitter: emitter
+    @Test @MainActor func systemGestureNoticePopulatedFromPreemptionPolicy() {
+        let state = makeState(checker: MockPermissionChecker())
+        #expect(state.systemGestureNotice != nil)
+    }
+
+    @Test @MainActor func supportedGestureSlotsMatchPreemptionPolicy() {
+        let state = makeState(checker: MockPermissionChecker())
+        let expected = PreemptionController().currentPolicy().supportedGestures.compactMap(GestureSlot.init(rawValue:))
+        #expect(state.supportedGestureSlots == expected)
+    }
+
+    @Test @MainActor func unsupportedPolicyGesturesAreExcluded() {
+        let policy = PreemptionPolicy(
+            strategy: .manualDisable,
+            supportedGestures: [GestureSlot.threeFingerSwipeLeft.rawValue, "unsupported.gesture"],
+            ownerNotice: "notice"
         )
+        let state = makeState(checker: MockPermissionChecker(), policy: policy)
+        #expect(state.supportedGestureSlots == [.threeFingerSwipeLeft])
+    }
 
-        state.refreshPermissions()
-        state.isEnabled = true
+    @Test @MainActor func handleAppLaunchPromptsAndTerminatesWhenPermissionsMissing() async {
+        let checker = MockPermissionChecker(accessibility: false)
+        let runtime = RecordingGestureRuntime()
+        let state = makeState(checker: checker, runtime: runtime)
+        var terminateCallCount = 0
+
+        state.handleAppLaunch {
+            terminateCallCount += 1
+        }
         await pumpEventLoop()
-        state.isEnabled = false
 
-        runtime.yield(.threeFingerSwipeRight)
+        #expect(state.permissionState == .denied)
+        #expect(state.isRunning == false)
+        #expect(runtime.startCallCount == 0)
+        #expect(checker.requestAccessibilityCallCount == 1)
+        #expect(terminateCallCount == 1)
+    }
+
+    @Test @MainActor func handleAppLaunchDoesNotPromptOrTerminateWhenPermissionsGranted() async {
+        let checker = MockPermissionChecker(accessibility: true)
+        let runtime = RecordingGestureRuntime()
+        let state = makeState(checker: checker, runtime: runtime)
+        var terminateCallCount = 0
+
+        state.handleAppLaunch {
+            terminateCallCount += 1
+        }
         await pumpEventLoop()
 
+        #expect(state.permissionState == .granted)
+        #expect(state.isRunning == true)
         #expect(runtime.startCallCount == 1)
-        #expect(runtime.stopCallCount == 1)
-        #expect(emitter.emittedSlots.isEmpty)
+        #expect(checker.requestAccessibilityCallCount == 0)
+        #expect(terminateCallCount == 0)
     }
 
-    @Test @MainActor func cannotEnableWithoutPermissions() {
-        let checker = MockPermissionChecker(accessibility: false, inputMonitoring: false)
-        let state = makeState(checker: checker)
-        state.refreshPermissions()
-        state.isEnabled = true
-        #expect(state.isEnabled == false)
-    }
-
-    @Test @MainActor func canEnableWithPermissionsGranted() {
-        let checker = MockPermissionChecker(accessibility: true, inputMonitoring: true)
-        let state = makeState(checker: checker)
-        state.refreshPermissions()
-        state.isEnabled = true
-        #expect(state.isEnabled == true)
-    }
-
-    @Test @MainActor func disablingAlwaysAllowed() {
-        let checker = MockPermissionChecker(accessibility: true, inputMonitoring: true)
-        let state = makeState(checker: checker)
-        state.refreshPermissions()
-        state.isEnabled = true
-        #expect(state.isEnabled == true)
-        state.isEnabled = false
-        #expect(state.isEnabled == false)
-    }
-
-    @Test @MainActor func permissionRevocationDisablesApp() {
-        let checker = MockPermissionChecker(accessibility: true, inputMonitoring: true)
-        let state = makeState(checker: checker)
-        state.refreshPermissions()
-        state.isEnabled = true
-        #expect(state.isEnabled == true)
-
-        checker.accessibility = false
-        state.refreshPermissions()
-        #expect(state.isEnabled == false)
-    }
-
-    @Test @MainActor func permissionStateExposedFromCoordinator() {
-        let checker = MockPermissionChecker(accessibility: true, inputMonitoring: false)
-        let state = makeState(checker: checker)
-        state.refreshPermissions()
-        #expect(state.permissionState == .denied(accessibility: true, inputMonitoring: false))
-    }
 }
 
-// MARK: - Mock
+// MARK: - Mocks
 
 final class MockPermissionChecker: PermissionChecking, @unchecked Sendable {
     var accessibility: Bool
-    var inputMonitoring: Bool
+    private(set) var requestAccessibilityCallCount = 0
 
-    init(accessibility: Bool = false, inputMonitoring: Bool = false) {
+    init(accessibility: Bool = false) {
         self.accessibility = accessibility
-        self.inputMonitoring = inputMonitoring
     }
 
     func isAccessibilityGranted() -> Bool { accessibility }
-    func isInputMonitoringGranted() -> Bool { inputMonitoring }
+
+    func requestAccessibility() {
+        requestAccessibilityCallCount += 1
+    }
 }
 
 @MainActor
