@@ -26,7 +26,8 @@ Bundle ID: `com.padium`, version 0.1.0. LSUIElement=true (no Dock icon).
 - `PadiumApp` skips that launch prompt+quit path under XCTest so host-app tests can run.
 - After re-sign, `tccutil reset Accessibility com.padium` only if permissions are stale.
 - Requires granting Accessibility permission in System Settings.
-- User must manually disable system trackpad gestures (Mission Control, App Exposé, swipe-between-fullscreen) — app uses `manual-disable` policy, cannot suppress programmatically
+- App automatically disables system trackpad gestures on launch (via `defaults write` + `killall Dock`) and restores originals on quit; `SystemGestureManager` persists a backup to UserDefaults so crash recovery can restore on next launch
+- `ScrollSuppressor` uses a CGEventTap to consume scroll wheel events while 3+ fingers are active on the trackpad, preventing 2-finger scroll from firing during 3-finger gestures; also suppresses momentum scroll after finger lift
 
 ## Test
 - `xcodebuild -project Padium.xcodeproj -scheme Padium test`
@@ -63,7 +64,9 @@ PadiumApp (@main)
 - `ShortcutRegistry.name(for:)` is the SINGLE source of truth for slot→`KeyboardShortcuts.Name` mapping — no ad-hoc Name creation elsewhere
 - Settings window: app launch starts permission polling immediately; menu-bar selection explicitly calls `openWindow(id: "settings")` and focuses the existing window; `onDisappear` resets `isSettingsPresented` to `false`
 - Permissions revoked while running → `refreshPermissions()` stops the runtime
-- `PreemptionController` policy is `manual-disable` — owner notice MUST stay visible in permissions/settings
+- `SystemGestureManager.shared` handles save/disable/restore of system gesture preferences; called by `AppState.startRuntimeIfNeeded()` (suppress) and `stopRuntime()` (restore); also hooked to `NSApplication.willTerminateNotification` and SIGTERM signal handler
+- `SystemGestureManager.restoreIfNeeded()` runs at app launch to recover from a crash that left gestures suppressed
+- `PreemptionController` detects per-slot system gesture conflicts; UI shows per-row warnings + "Open Trackpad Settings" button (serves as fallback if auto-suppress ever fails)
 
 ## Coding Conventions
 - `@MainActor` on all UI-bound and state classes

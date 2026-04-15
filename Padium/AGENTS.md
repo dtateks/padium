@@ -15,10 +15,12 @@
 | ShortcutEmitter.swift | Key posting | `CGEventShortcutSender` posts explicit modifier transitions + key events via `.cghidEventTap` |
 | ShortcutRegistry.swift | Name mapping | `"gesture.\(slot.rawValue)"` pattern — single source of truth |
 | PermissionCoordinator.swift | Permissions | `PermissionState` enum (.checking/.granted/.denied), `SystemPermissionChecker` |
-| PreemptionController.swift | Policy | Reads `com.apple.AppleMultitouchTrackpad` domain, throws if manual disable needed |
-| SettingsView.swift | UI | Groups slots by `sectionTitle`, shows `systemGestureNotice` warning |
-| PermissionsView.swift | UI | Per-permission status rows + System Settings deep links |
-| GestureRowView.swift | UI | `KeyboardShortcuts.Recorder(for:)` per slot |
+| PreemptionController.swift | Conflict detection | Reads `com.apple.AppleMultitouchTrackpad` domain, `conflictingSlots()` returns affected GestureSlots, `openTrackpadSettings()` deep-links to System Settings |
+| SystemGestureManager.swift | Gesture suppression | `suppress()` saves + disables system gestures via `defaults write` + `killall Dock`; `restore()` writes back originals; backup in UserDefaults for crash recovery |
+| ScrollSuppressor.swift | Scroll suppression | CGEventTap on `.scrollWheel` consumes scroll events while 3+ fingers active; `os_unfair_lock`-guarded `isMultitouchActive` flag set by GestureEngine; also suppresses momentum scroll after lift |
+| SettingsView.swift | UI | Groups slots by `sectionTitle`, shows per-row conflict warnings + "Open Trackpad Settings" button |
+| PermissionsView.swift | UI | Accessibility status + per-system-gesture conflict list + "Open Trackpad Settings" + "Refresh" |
+| GestureRowView.swift | UI | `KeyboardShortcuts.Recorder(for:)` per slot, shows conflict warning via `isConflicting` flag |
 | Logger.swift | Logging | `PadiumLogger` enum: `.gesture`, `.shortcut`, `.permission` categories |
 
 # Module-Specific Gotchas
@@ -30,3 +32,7 @@
 - Launch without Accessibility permission immediately prompts, then terminates; `PadiumApp` bypasses that path under XCTest so host-app tests can run
 - Shared gesture sensitivity lives in AppState/config state and restarts the runtime when changed
 - Menu-bar selection explicitly focuses the existing settings window rather than spawning duplicates
+- `PreemptionController.conflictingSlots()` returns the set of Padium gesture slots conflicting with enabled system gestures; `AppState` exposes this as `conflictingSlots` and refreshes on every `refreshPermissions()` call
+- OMS reads raw touches in parallel with macOS — it cannot suppress system gesture recognizers; `SystemGestureManager` handles system gesture prefs (Mission Control, Spaces, App Exposé) and `ScrollSuppressor` handles scroll-during-multitouch via CGEventTap
+- `ScrollSuppressor.isMultitouchActive` is set from `GestureEngine`'s pipeline task (which runs on an arbitrary thread from OMS); the flag uses `os_unfair_lock`; the CGEventTap callback reads the flag to decide whether to consume scroll events
+- Momentum scroll events after finger lift are also suppressed until the momentum phase ends
