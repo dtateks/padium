@@ -5,7 +5,10 @@ ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 INSTALL_DIR="${PADIUM_INSTALL_DIR:-$HOME/Applications}"
 INSTALL_APP="$INSTALL_DIR/Padium.app"
 
-SIGN_HASH="${PADIUM_SIGN_HASH:-$({ security find-identity -v -p codesigning || true; } | /usr/bin/python3 -c '
+if [[ -n "${PADIUM_SIGN_HASH:-}" ]]; then
+	SIGN_HASH="$PADIUM_SIGN_HASH"
+else
+	SIGN_HASH="$(security find-identity -v -p codesigning 2>/dev/null | /usr/bin/python3 -c '
 import re, sys
 candidates = []
 for line in sys.stdin:
@@ -18,7 +21,8 @@ for preferred in ("Apple Development", "Mac Development"):
             print(identity_hash)
             raise SystemExit(0)
 raise SystemExit(1)
-') } )}"
+' || true)"
+fi
 
 if [[ -z "$SIGN_HASH" ]]; then
 	print -u2 "No Apple Development or Mac Development signing identity found."

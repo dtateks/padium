@@ -22,6 +22,8 @@
 		AA010101010D /* PermissionCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA020101010D /* PermissionCoordinator.swift */; };
 		AA010101010E /* PermissionsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA020101010E /* PermissionsView.swift */; };
 		AA010101010F /* PreemptionController.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA020101010F /* PreemptionController.swift */; };
+		AA0101010111 /* SystemGestureManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0201010112 /* SystemGestureManager.swift */; };
+		AA0101010113 /* ScrollSuppressor.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0201010114 /* ScrollSuppressor.swift */; };
 		AA0101010110 /* Logger.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0201010110 /* Logger.swift */; };
 		AA0101020201 /* GestureClassifierTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0301020201 /* GestureClassifierTests.swift */; };
 		AA0101020202 /* GestureEngineTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0301020202 /* GestureEngineTests.swift */; };
@@ -49,6 +51,8 @@
 		AA020101010D /* PermissionCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PermissionCoordinator.swift; sourceTree = "<group>"; };
 		AA020101010E /* PermissionsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PermissionsView.swift; sourceTree = "<group>"; };
 		AA020101010F /* PreemptionController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PreemptionController.swift; sourceTree = "<group>"; };
+		AA0201010112 /* SystemGestureManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SystemGestureManager.swift; sourceTree = "<group>"; };
+		AA0201010114 /* ScrollSuppressor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScrollSuppressor.swift; sourceTree = "<group>"; };
 		AA0201010110 /* Logger.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Logger.swift; sourceTree = "<group>"; };
 		AA0201010111 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		AA0301020201 /* GestureClassifierTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GestureClassifierTests.swift; sourceTree = "<group>"; };
@@ -110,6 +114,8 @@
 				AA020101010D /* PermissionCoordinator.swift */,
 				AA020101010E /* PermissionsView.swift */,
 				AA020101010F /* PreemptionController.swift */,
+				AA0201010112 /* SystemGestureManager.swift */,
+				AA0201010114 /* ScrollSuppressor.swift */,
 				AA0201010110 /* Logger.swift */,
 				AA0201010111 /* Info.plist */,
 			);
@@ -253,6 +259,8 @@
 				AA010101010D /* PermissionCoordinator.swift in Sources */,
 				AA010101010E /* PermissionsView.swift in Sources */,
 				AA010101010F /* PreemptionController.swift in Sources */,
+				AA0101010111 /* SystemGestureManager.swift in Sources */,
+				AA0101010113 /* ScrollSuppressor.swift in Sources */,
 				AA0101010110 /* Logger.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
