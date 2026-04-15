@@ -49,7 +49,20 @@ if [[ ! -d "$BUILD_APP" ]]; then
 	exit 1
 fi
 
+# Quit running Padium gracefully so UserDefaults (including keyboard shortcuts) are flushed.
+# AppleScript quit triggers NSApplication.terminate which syncs defaults before exit.
+# Falls back to killall if AppleScript fails (e.g., app is hung).
+if pgrep -x Padium >/dev/null 2>&1; then
+	osascript -e 'tell application "Padium" to quit' 2>/dev/null || killall Padium 2>/dev/null || true
+	for _ in {1..50}; do
+		pgrep -x Padium >/dev/null 2>&1 || break
+		sleep 0.1
+	done
+fi
+
 mkdir -p "$INSTALL_DIR"
 /usr/bin/rsync -a --delete "$BUILD_APP/" "$INSTALL_APP/"
 codesign --force --deep --sign "$SIGN_HASH" "$INSTALL_APP"
+/usr/bin/touch "$INSTALL_APP"
+/System/Library/Frameworks/CoreServices.framework/Versions/Current/Frameworks/LaunchServices.framework/Versions/Current/Support/lsregister -f -R -trusted "$INSTALL_APP"
 open "$INSTALL_APP"

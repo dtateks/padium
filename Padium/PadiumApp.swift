@@ -18,11 +18,14 @@ struct PadiumApp: App {
                 object: nil,
                 queue: .main
             ) { _ in
+                UserDefaults.standard.synchronize()
                 Self.restoreSystemGestures()
             }
 
             let src = DispatchSource.makeSignalSource(signal: SIGTERM, queue: .main)
             src.setEventHandler {
+                // Flush defaults IMMEDIATELY before any async work to prevent shortcut loss.
+                UserDefaults.standard.synchronize()
                 Self.restoreSystemGesturesAndExit()
             }
             src.resume()
@@ -45,7 +48,7 @@ struct PadiumApp: App {
     nonisolated private static func restoreSystemGesturesAndExit() {
         Task { @MainActor in
             SystemGestureManager.shared.restore()
-            exit(0)
+            NSApp.terminate(nil)
         }
     }
 
