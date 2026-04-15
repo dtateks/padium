@@ -5,7 +5,7 @@
 | File | Role | Key Detail |
 |------|------|------------|
 | PadiumApp.swift | @main entry | MenuBarExtra + Window(id: "settings"), `SettingsContentView` owns TabView |
-| AppState.swift | Orchestration | `@Observable`, owns runtime Task, protocols `GestureRuntimeControlling`/`ShortcutEmitting` defined here |
+| AppState.swift | Orchestration | `@Observable`, owns runtime Task, injects shortcut/middle-click emitters, and dedups 3-finger tap middle clicks against physical click conversion |
 | GestureEngine.swift | Pipeline | Tracks stable candidates by finger count + touch IDs, arbitrates tap vs double-tap on lift, emits once, suppresses duplicates until lift |
 | GestureClassifier.swift | Classification | Stable touch IDs, dominant-axis commitment, per-finger direction agreement, lateral-drift tolerance on vertical swipes |
 | GestureSource.swift | Protocol + types | `GestureSource` protocol, `TouchPoint` struct, `OMSTouchState` enum — boundary above OMS |
@@ -16,8 +16,8 @@
 | ShortcutRegistry.swift | Name mapping | `"gesture.\(slot.rawValue)"` pattern — single source of truth |
 | PermissionCoordinator.swift | Permissions | `PermissionState` enum (.checking/.granted/.denied), `SystemPermissionChecker` |
 | PreemptionController.swift | Conflict detection | Reads `com.apple.AppleMultitouchTrackpad` domain, filters conflicts down to currently configured GestureSlots, `openTrackpadSettings()` deep-links to System Settings |
-| SystemGestureManager.swift | Gesture suppression | `suppress(conflictingSettings:)` selectively disables only the matching macOS gesture prefs via `defaults write` + `killall Dock`; `restore()` writes back originals; backup in UserDefaults for crash recovery |
-| ScrollSuppressor.swift | Scroll suppression | CGEventTap on `.scrollWheel` consumes scroll events while 3+ fingers active; `os_unfair_lock`-guarded `isMultitouchActive` flag set by GestureEngine; also suppresses momentum scroll after lift |
+| SystemGestureManager.swift | Gesture suppression | `suppress(conflictingSettings:allSettings:)` selectively disables matching macOS gesture prefs via `defaults write` + `killall Dock`; Dock keys disable only when all enabled vertical gestures are suppressed; `restore()` writes back originals; backup in UserDefaults for crash recovery |
+| ScrollSuppressor.swift | Scroll + click suppression | CGEventTap on `.scrollWheel`, `.leftMouseDown`, and `.leftMouseUp`; consumes scroll events while 3+ fingers active, converts configured physical 3-finger clicks to middle click, and suppresses duplicate left clicks after tap-path middle clicks |
 | SettingsView.swift | UI | Groups slots by `sectionTitle`, shows per-row conflict warnings + experimental tap caveat, sensitivity copy limited to swipes |
 | PermissionsView.swift | UI | Accessibility status + per-system-gesture conflict list + "Open Trackpad Settings" + "Refresh" |
 | GestureRowView.swift | UI | `KeyboardShortcuts.Recorder(for:)` per slot, shows conflict warning via `isConflicting` flag |
@@ -33,6 +33,7 @@
 - `AppState` updates active slots from recorder `onChange` callbacks before routing decisions; shortcut-binding changes must refresh conflict state and gesture routing together
 - Menu-bar selection explicitly focuses the existing settings window rather than spawning duplicates
 - `PreemptionController.conflictingSlots(for:)` returns only the currently configured Padium slots that still conflict with enabled system gestures; `AppState` refreshes this after permission and shortcut-binding changes
-- OMS reads raw touches in parallel with macOS — it cannot suppress system gesture recognizers; `SystemGestureManager` handles system gesture prefs (Mission Control, Spaces, App Exposé) and `ScrollSuppressor` handles scroll-during-multitouch via CGEventTap
-- `ScrollSuppressor.isMultitouchActive` is set from `GestureEngine`'s pipeline task (which runs on an arbitrary thread from OMS); the flag uses `os_unfair_lock`; the CGEventTap callback reads the flag to decide whether to consume scroll events
+- OMS reads raw touches in parallel with macOS — it cannot suppress system gesture recognizers; `SystemGestureManager` handles system gesture prefs (Mission Control, Spaces, App Exposé); Dock keys are only disabled when all enabled vertical gestures are suppressed, not when a single finger-count variant is suppressed. `ScrollSuppressor` handles scroll-during-multitouch via CGEventTap
+- `ScrollSuppressor.isMultitouchActive` and `currentFingerCount` are set from `GestureEngine`'s pipeline task (which runs on an arbitrary thread from OMS); both use the same `os_unfair_lock`-protected state read by the CGEventTap callback for scroll suppression and physical click conversion
+- Physical 3-finger click conversion only consults `GestureActionStore.actionKind(for: .threeFingerTap)`; tap-path middle clicks register a dedup window so the follow-up left click is swallowed instead of generating a second middle click
 - Momentum scroll events after finger lift are also suppressed until the momentum phase ends
