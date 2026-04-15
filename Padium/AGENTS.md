@@ -25,7 +25,7 @@
 
 # Module-Specific Gotchas
 - `OMSGestureSource` is `@unchecked Sendable` — mutable state accessed only from its internal Task; do not add shared mutable state without synchronization
-- `GestureClassifier` applies a +20 point base boost before threshold mapping, so default 50% behaves like the previous 70% calibration; shared sensitivity remaps swipe thresholds only and is read live without an AppState runtime restart
+- `GestureClassifier` applies a +25 point base boost before threshold mapping, so default 50% behaves like the previous 75% calibration (previous 70%); shared sensitivity remaps swipe thresholds only and is read live without an AppState runtime restart
 - `GestureClassifier` tolerates lateral drift on vertical swipes while preserving dominant-axis commitment and per-finger agreement
 - `GestureEngine` ignores frames after a committed gesture until a lift frame clears the candidate; tap/double-tap recognition is experimental and derived from raw touch frames
 - `PermissionCoordinator` polling is owned by `AppState` from app launch so permission revocation can stop the runtime even while settings is closed
