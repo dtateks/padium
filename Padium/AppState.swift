@@ -17,8 +17,33 @@ protocol ShortcutEmitting: AnyObject {
     @discardableResult func emitConfiguredShortcut(for slot: GestureSlot) -> Bool
 }
 
+@MainActor
+protocol MiddleClickEmitting: AnyObject {
+    @discardableResult func emitMiddleClick() -> Bool
+}
+
 extension GestureEngine: GestureRuntimeControlling {}
 extension ShortcutEmitter: ShortcutEmitting {}
+
+@MainActor
+final class MiddleClickEmitter: MiddleClickEmitting {
+    @discardableResult
+    func emitMiddleClick() -> Bool {
+        guard let src = CGEventSource(stateID: .hidSystemState) else { return false }
+        let position = CGEvent(source: nil)?.location ?? .zero
+        guard let down = CGEvent(mouseEventSource: src, mouseType: .otherMouseDown, mouseCursorPosition: position, mouseButton: .center),
+              let up = CGEvent(mouseEventSource: src, mouseType: .otherMouseUp, mouseCursorPosition: position, mouseButton: .center)
+        else {
+            return false
+        }
+
+        ScrollSuppressor.configureMiddleClickEvent(down, clickState: 1)
+        ScrollSuppressor.configureMiddleClickEvent(up, clickState: 1)
+        down.post(tap: .cghidEventTap)
+        up.post(tap: .cghidEventTap)
+        return true
+    }
+}
 
 @MainActor
 protocol PreemptionControlling: AnyObject {
@@ -32,7 +57,7 @@ protocol PreemptionControlling: AnyObject {
 @MainActor
 protocol SystemGestureManaging: AnyObject {
     var isSuppressed: Bool { get }
-    func suppress(conflictingSettings: [SystemGestureSetting])
+    func suppress(conflictingSettings: [SystemGestureSetting], allSettings: [SystemGestureSetting])
     func restore()
     func restoreIfNeeded()
 }
@@ -55,6 +80,7 @@ final class AppState {
     private let systemGestureManager: any SystemGestureManaging
     private let gestureEngine: any GestureRuntimeControlling
     private let shortcutEmitter: any ShortcutEmitting
+    private let middleClickEmitter: any MiddleClickEmitting
     private var runtimeTask: Task<Void, Never>?
 
     init(
@@ -62,7 +88,8 @@ final class AppState {
         preemptionController: (any PreemptionControlling)? = nil,
         systemGestureManager: (any SystemGestureManaging)? = nil,
         gestureEngine: (any GestureRuntimeControlling)? = nil,
-        shortcutEmitter: (any ShortcutEmitting)? = nil
+        shortcutEmitter: (any ShortcutEmitting)? = nil,
+        middleClickEmitter: (any MiddleClickEmitting)? = nil
     ) {
         self.coordinator = PermissionCoordinator(checker: permissionChecker)
 
@@ -83,6 +110,7 @@ final class AppState {
         }
 
         self.shortcutEmitter = shortcutEmitter ?? ShortcutEmitter()
+        self.middleClickEmitter = middleClickEmitter ?? MiddleClickEmitter()
         self.gestureEngine.updateActiveSlots(configuredGestureSlots())
         refreshSystemGestureConflicts()
     }
@@ -175,7 +203,14 @@ final class AppState {
             guard let self else { return }
             for await event in self.gestureEngine.events {
                 guard self.coordinator.isFullyGranted else { continue }
-                _ = self.shortcutEmitter.emitConfiguredShortcut(for: event.slot)
+                switch GestureActionStore.actionKind(for: event.slot) {
+                case .shortcut:
+                    _ = self.shortcutEmitter.emitConfiguredShortcut(for: event.slot)
+                case .middleClick:
+                    guard self.shouldEmitMiddleClick(for: event) else { continue }
+                    PadiumLogger.gesture.debug("TAP-DIAG: emitting middle click for \(event.slot.rawValue, privacy: .public)")
+                    _ = self.middleClickEmitter.emitMiddleClick()
+                }
             }
         }
     }
@@ -189,9 +224,17 @@ final class AppState {
     }
 
     func handleShortcutConfigurationChange() {
+        // Flush shortcut/action-kind changes to disk immediately so they survive
+        // unexpected termination or rebuild-kill sequences.
+        UserDefaults.standard.synchronize()
+
         gestureEngine.updateActiveSlots(configuredGestureSlots())
         if isRunning {
             applySystemGestureSuppression()
+        } else if coordinator.isFullyGranted {
+            // Runtime may have failed to start on first launch (e.g., OMS not yet available).
+            // Retry now that the user changed config.
+            startRuntimeIfNeeded()
         }
         refreshSystemGestureConflicts()
     }
@@ -202,18 +245,24 @@ final class AppState {
         }
 
         let configuredSlots = configuredGestureSlots()
+        let allSettings = preemptionController.currentSystemGestureSettings()
         let conflictingSettings = preemptionController.conflictingSettings(for: configuredSlots)
         guard !conflictingSettings.isEmpty else { return }
 
-        systemGestureManager.suppress(conflictingSettings: conflictingSettings)
+        systemGestureManager.suppress(conflictingSettings: conflictingSettings, allSettings: allSettings)
     }
 
     private func configuredGestureSlots() -> Set<GestureSlot> {
-        Set(
-            supportedGestureSlots.filter {
-                KeyboardShortcuts.getShortcut(for: ShortcutRegistry.name(for: $0)) != nil
-            }
-        )
+        Set(supportedGestureSlots.filter(\.isConfigured))
+    }
+
+    private func shouldEmitMiddleClick(for event: GestureEvent) -> Bool {
+        guard event.slot == .threeFingerTap else { return true }
+        guard ScrollSuppressor.shared.registerGestureMiddleClickIfNeeded(at: event.timestamp) else {
+            PadiumLogger.gesture.debug("TAP-DIAG: suppressing duplicate tap middle click for \(event.slot.rawValue, privacy: .public)")
+            return false
+        }
+        return true
     }
 }
 
