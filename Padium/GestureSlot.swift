@@ -1,4 +1,5 @@
 import Foundation
+import KeyboardShortcuts
 
 enum GestureSlot: String, CaseIterable, Sendable {
     case threeFingerSwipeLeft
@@ -103,4 +104,42 @@ enum GestureSlot: String, CaseIterable, Sendable {
         }
     }
 
+    /// Whether this slot supports choosing between keyboard shortcut and middle click.
+    var supportsActionKindChoice: Bool {
+        kind == .tap
+    }
+
+    /// Resolves the effective action for this slot.
+    /// Tap/doubleTap slots with `.middleClick` action kind are configured even without a shortcut.
+    var isConfigured: Bool {
+        if GestureActionStore.actionKind(for: self) == .middleClick { return true }
+        return KeyboardShortcuts.getShortcut(for: ShortcutRegistry.name(for: self)) != nil
+    }
+}
+
+// MARK: - Gesture Action Kind
+
+enum GestureActionKind: String, CaseIterable, Sendable {
+    case shortcut
+    case middleClick
+}
+
+enum GestureActionStore {
+    private static let prefix = "gesture.action."
+
+    static func actionKind(for slot: GestureSlot) -> GestureActionKind {
+        guard let raw = UserDefaults.standard.string(forKey: prefix + slot.rawValue),
+              let kind = GestureActionKind(rawValue: raw) else {
+            return .shortcut
+        }
+        return kind
+    }
+
+    static func setActionKind(_ kind: GestureActionKind, for slot: GestureSlot) {
+        if kind == .shortcut {
+            UserDefaults.standard.removeObject(forKey: prefix + slot.rawValue)
+        } else {
+            UserDefaults.standard.set(kind.rawValue, forKey: prefix + slot.rawValue)
+        }
+    }
 }

@@ -165,6 +165,7 @@ final class GestureEngine {
 
             defer {
                 localContinuation.finish()
+                ScrollSuppressor.shared.currentFingerCount = 0
                 ScrollSuppressor.shared.isMultitouchActive = false
             }
 
@@ -176,8 +177,11 @@ final class GestureEngine {
                     break
                 }
 
+                ScrollSuppressor.shared.currentFingerCount = frame.count
+
                 if frame.isEmpty {
                     if let candidate {
+                        PadiumLogger.gesture.debug("TAP-DIAG: lift with candidate fc=\(candidate.fingerCount) travel=\(candidate.maximumTravel) dur=\(candidate.duration(at: self.scheduler.now))")
                         self.handleLift(of: candidate, using: localContinuation)
                     }
                     candidate = nil
@@ -190,20 +194,38 @@ final class GestureEngine {
                     continue
                 }
 
+                // Log raw frame states for 3+ touch frames
+                if frame.count >= 3 {
+                    let states = frame.map { "\($0.identifier):\($0.state.rawValue)" }.joined(separator: " ")
+                    PadiumLogger.gesture.debug("TAP-DIAG: frame touches=\(frame.count) states=[\(states, privacy: .public)]")
+                }
+
                 guard let contacts = localClassifier.stableActiveContacts(in: frame) else {
-                    candidate = nil
-                    ScrollSuppressor.shared.isMultitouchActive = false
+                    // Touches are present but not in a classifiable state (e.g., starting
+                    // or leaving transitions). Keep the candidate alive so tap recognition
+                    // can complete on the subsequent empty frame.
+                    if frame.count >= 3 {
+                        PadiumLogger.gesture.debug("TAP-DIAG: no active contacts, candidate=\(candidate != nil)")
+                    }
                     continue
                 }
 
                 let fingerCount = contacts.count
                 guard fingerCount == 3 || fingerCount == 4 else {
+                    // Some fingers may have transitioned to leaving/starting while others
+                    // are still active, causing a temporarily lower active count. If the
+                    // TOTAL frame has enough touches, preserve the candidate for tap detection.
+                    if candidate != nil, frame.count >= (candidate?.fingerCount ?? 3) {
+                        PadiumLogger.gesture.debug("TAP-DIAG: active=\(fingerCount) but frame=\(frame.count), keeping candidate")
+                        continue
+                    }
                     candidate = nil
                     ScrollSuppressor.shared.isMultitouchActive = false
                     continue
                 }
 
                 guard self.hasActiveSlots(for: fingerCount) else {
+                    PadiumLogger.gesture.debug("TAP-DIAG: no active slots for fc=\(fingerCount)")
                     candidate = nil
                     ScrollSuppressor.shared.isMultitouchActive = false
                     continue
@@ -255,6 +277,7 @@ final class GestureEngine {
         pipelineTask?.cancel()
         pipelineTask = nil
         isRunning = false
+        ScrollSuppressor.shared.currentFingerCount = 0
         ScrollSuppressor.shared.isMultitouchActive = false
     }
 
@@ -275,8 +298,17 @@ final class GestureEngine {
         using continuation: AsyncStream<GestureEvent>.Continuation
     ) {
         let recognitionTime = scheduler.now
-        guard candidate.duration(at: recognitionTime) <= GestureTapSettings.maximumDuration else { return }
-        guard candidate.maximumTravel <= GestureTapSettings.maximumTravel else { return }
+        let duration = candidate.duration(at: recognitionTime)
+        let travel = candidate.maximumTravel
+        guard duration <= GestureTapSettings.maximumDuration else {
+            PadiumLogger.gesture.debug("TAP-DIAG: REJECTED duration=\(duration) > max=\(GestureTapSettings.maximumDuration)")
+            return
+        }
+        guard travel <= GestureTapSettings.maximumTravel else {
+            PadiumLogger.gesture.debug("TAP-DIAG: REJECTED travel=\(travel) > max=\(GestureTapSettings.maximumTravel)")
+            return
+        }
+        PadiumLogger.gesture.debug("TAP-DIAG: ACCEPTED tap fc=\(candidate.fingerCount) dur=\(duration) travel=\(travel)")
 
         handleRecognizedTap(
             fingerCount: candidate.fingerCount,

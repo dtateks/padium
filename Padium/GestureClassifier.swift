@@ -40,7 +40,8 @@ enum GestureSensitivitySetting {
 
 enum GestureTapSettings {
     static let maximumTravel: Float = 0.05
-    static let maximumDuration: TimeInterval = 0.2
+    // 500ms supports both light taps (~100ms) and physical clicks (~300-500ms).
+    static let maximumDuration: TimeInterval = 0.5
     static let doubleTapWindow: TimeInterval = 0.3
 }
 
@@ -192,9 +193,9 @@ struct GestureClassifier: Sendable {
 
     private func isActiveState(_ state: OMSTouchState) -> Bool {
         switch state {
-        case .touching, .lingering, .breaking, .making:
+        case .starting, .making, .touching, .lingering, .breaking:
             return true
-        case .starting, .hovering, .notTouching, .leaving:
+        case .hovering, .notTouching, .leaving:
             return false
         }
     }
