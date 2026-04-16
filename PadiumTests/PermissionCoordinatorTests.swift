@@ -4,6 +4,66 @@ import ApplicationServices
 import Foundation
 import KeyboardShortcuts
 
+private struct GestureConfigurationSnapshot {
+    private static let sensitivityKey = "gesture.sensitivity"
+
+    let shortcuts: [GestureSlot: KeyboardShortcuts.Shortcut?]
+    let actionKinds: [GestureSlot: GestureActionKind]
+    let sensitivity: Double?
+
+    static func capture() -> GestureConfigurationSnapshot {
+        GestureConfigurationSnapshot(
+            shortcuts: Dictionary(uniqueKeysWithValues: GestureSlot.allCases.map { slot in
+                (slot, KeyboardShortcuts.getShortcut(for: ShortcutRegistry.name(for: slot)))
+            }),
+            actionKinds: Dictionary(uniqueKeysWithValues: GestureSlot.allCases.map { slot in
+                (slot, GestureActionStore.actionKind(for: slot))
+            }),
+            sensitivity: UserDefaults.standard.object(forKey: sensitivityKey) as? Double
+        )
+    }
+
+    static func resetForTest() {
+        for slot in GestureSlot.allCases {
+            KeyboardShortcuts.setShortcut(nil, for: ShortcutRegistry.name(for: slot))
+            GestureActionStore.setActionKind(.shortcut, for: slot)
+        }
+        UserDefaults.standard.removeObject(forKey: sensitivityKey)
+        UserDefaults.standard.synchronize()
+        ScrollSuppressor.shared.stop()
+    }
+
+    func restore() {
+        for slot in GestureSlot.allCases {
+            KeyboardShortcuts.setShortcut(shortcuts[slot] ?? nil, for: ShortcutRegistry.name(for: slot))
+            GestureActionStore.setActionKind(actionKinds[slot] ?? .shortcut, for: slot)
+        }
+
+        if let sensitivity {
+            GestureSensitivitySetting.store(sensitivity)
+        } else {
+            UserDefaults.standard.removeObject(forKey: Self.sensitivityKey)
+        }
+
+        UserDefaults.standard.synchronize()
+        ScrollSuppressor.shared.stop()
+    }
+}
+
+private final class GestureConfigurationPreserver {
+    private let snapshot = GestureConfigurationSnapshot.capture()
+
+    init(resetForTest: Bool = true) {
+        if resetForTest {
+            GestureConfigurationSnapshot.resetForTest()
+        }
+    }
+
+    deinit {
+        snapshot.restore()
+    }
+}
+
 // MARK: - PermissionCoordinator tests
 
 struct PermissionCoordinatorTests {
@@ -95,30 +155,37 @@ struct AppStateTests {
     }
 
     @Test @MainActor func initialStateNotRunning() {
+        let preservedConfig = GestureConfigurationPreserver()
         let state = makeState(checker: MockPermissionChecker())
         #expect(state.isRunning == false)
         #expect(state.permissionState == .checking)
+        _ = preservedConfig
     }
 
     @Test @MainActor func refreshPermissionsAutoStartsWhenGranted() async {
+        let preservedConfig = GestureConfigurationPreserver()
         let checker = MockPermissionChecker(accessibility: true)
         let runtime = RecordingGestureRuntime()
         let state = makeState(checker: checker, runtime: runtime)
         state.refreshPermissions()
         #expect(state.isRunning == true)
         #expect(runtime.startCallCount == 1)
+        _ = preservedConfig
     }
 
     @Test @MainActor func refreshPermissionsDoesNotStartWhenDenied() {
+        let preservedConfig = GestureConfigurationPreserver()
         let checker = MockPermissionChecker(accessibility: false)
         let runtime = RecordingGestureRuntime()
         let state = makeState(checker: checker, runtime: runtime)
         state.refreshPermissions()
         #expect(state.isRunning == false)
         #expect(runtime.startCallCount == 0)
+        _ = preservedConfig
     }
 
     @Test @MainActor func permissionRevocationStopsRuntime() {
+        let preservedConfig = GestureConfigurationPreserver()
         let checker = MockPermissionChecker(accessibility: true)
         let runtime = RecordingGestureRuntime()
         let state = makeState(checker: checker, runtime: runtime)
@@ -129,9 +196,11 @@ struct AppStateTests {
         state.refreshPermissions()
         #expect(state.isRunning == false)
         #expect(runtime.stopCallCount == 1)
+        _ = preservedConfig
     }
 
     @Test @MainActor func runtimeEmitsShortcutWhenPermissionsGranted() async {
+        let preservedConfig = GestureConfigurationPreserver()
         let checker = MockPermissionChecker(accessibility: true)
         let runtime = RecordingGestureRuntime()
         let emitter = RecordingShortcutEmitter()
@@ -144,9 +213,11 @@ struct AppStateTests {
         await pumpEventLoop()
 
         #expect(emitter.emittedSlots == [.threeFingerSwipeLeft])
+        _ = preservedConfig
     }
 
     @Test @MainActor func runtimeEmitsMiddleClickWhenThreeFingerTapUsesMiddleClickAction() async {
+        let preservedConfig = GestureConfigurationPreserver()
         clearAllShortcutBindings()
         defer { clearAllShortcutBindings() }
 
@@ -172,9 +243,11 @@ struct AppStateTests {
         checker.accessibility = false
         state.refreshPermissions()
         await pumpEventLoop()
+        _ = preservedConfig
     }
 
     @Test @MainActor func runtimeSuppressesOnlyConfiguredGestureConflicts() {
+        let preservedConfig = GestureConfigurationPreserver()
         let controller = StubPreemptionController(settings: StubPreemptionController.allEnabledSettings)
         let systemGestureManager = RecordingSystemGestureManager()
         let name = ShortcutRegistry.name(for: .threeFingerSwipeLeft)
@@ -192,9 +265,11 @@ struct AppStateTests {
 
         #expect(systemGestureManager.suppressedSettingKeys == ["TrackpadThreeFingerHorizSwipeGesture"])
         #expect(systemGestureManager.restoreCallCount == 0)
+        _ = preservedConfig
     }
 
     @Test @MainActor func systemGestureSettingsOnlyIncludeConfiguredConflicts() {
+        let preservedConfig = GestureConfigurationPreserver()
         let controller = StubPreemptionController(settings: StubPreemptionController.allEnabledSettings)
         let name = ShortcutRegistry.name(for: .fourFingerSwipeUp)
         clearAllShortcutBindings()
@@ -207,9 +282,11 @@ struct AppStateTests {
         )
 
         #expect(state.systemGestureSettings().map(\.key) == ["TrackpadFourFingerVertSwipeGesture"])
+        _ = preservedConfig
     }
 
     @Test @MainActor func shortcutConfigChangeRecomputesSuppressionWhileRunning() {
+        let preservedConfig = GestureConfigurationPreserver()
         let controller = StubPreemptionController(settings: StubPreemptionController.allEnabledSettings)
         let systemGestureManager = RecordingSystemGestureManager()
         let name = ShortcutRegistry.name(for: .fourFingerSwipeUp)
@@ -236,9 +313,11 @@ struct AppStateTests {
 
         #expect(systemGestureManager.restoreCallCount == 1)
         #expect(systemGestureManager.suppressedSettingKeys.isEmpty)
+        _ = preservedConfig
     }
 
     @Test @MainActor func changingSensitivityDoesNotRestartRunningRuntime() {
+        let preservedConfig = GestureConfigurationPreserver()
         let checker = MockPermissionChecker(accessibility: true)
         let runtime = RecordingGestureRuntime()
         let state = makeState(checker: checker, runtime: runtime)
@@ -253,9 +332,30 @@ struct AppStateTests {
         #expect(state.isRunning == true)
         #expect(runtime.startCallCount == 1)
         #expect(runtime.stopCallCount == 0)
+        _ = preservedConfig
+    }
+
+    @Test @MainActor func defaultsSensitivityChangeUpdatesStateWithoutRestart() async {
+        let preservedConfig = GestureConfigurationPreserver()
+        let checker = MockPermissionChecker(accessibility: true)
+        let runtime = RecordingGestureRuntime()
+        let state = makeState(checker: checker, runtime: runtime)
+
+        state.refreshPermissions()
+        #expect(state.gestureSensitivity == GestureSensitivitySetting.defaultValue)
+        #expect(runtime.startCallCount == 1)
+
+        GestureSensitivitySetting.store(0.8)
+        NotificationCenter.default.post(name: UserDefaults.didChangeNotification, object: UserDefaults.standard)
+        await pumpEventLoop()
+
+        #expect(state.gestureSensitivity == 0.8)
+        #expect(runtime.startCallCount == 1)
+        _ = preservedConfig
     }
 
     @Test @MainActor func shortcutConfigChangeUpdatesRuntimeActiveSlots() {
+        let preservedConfig = GestureConfigurationPreserver()
         let runtime = RecordingGestureRuntime()
         clearAllShortcutBindings()
         defer { clearAllShortcutBindings() }
@@ -271,9 +371,51 @@ struct AppStateTests {
         state.handleShortcutConfigurationChange()
 
         #expect(runtime.activeSlotsHistory.last == [.threeFingerTap])
+        _ = preservedConfig
+    }
+
+    @Test @MainActor func defaultsShortcutChangeUpdatesRuntimeActiveSlots() async {
+        let preservedConfig = GestureConfigurationPreserver()
+        let runtime = RecordingGestureRuntime()
+        let state = makeState(
+            checker: MockPermissionChecker(accessibility: true),
+            runtime: runtime
+        )
+        #expect(runtime.activeSlotsHistory.last == [])
+
+        let name = ShortcutRegistry.name(for: .threeFingerTap)
+        KeyboardShortcuts.setShortcut(.init(.f13, modifiers: []), for: name)
+        NotificationCenter.default.post(name: UserDefaults.didChangeNotification, object: UserDefaults.standard)
+        await pumpEventLoop()
+
+        #expect(runtime.activeSlotsHistory.last == [.threeFingerTap])
+        _ = state
+        _ = preservedConfig
+    }
+
+    @Test @MainActor func twoFingerDoubleTapConfigurationSuppressesSmartZoom() {
+        let preservedConfig = GestureConfigurationPreserver()
+        let controller = StubPreemptionController(settings: StubPreemptionController.allEnabledSettings)
+        let systemGestureManager = RecordingSystemGestureManager()
+        let name = ShortcutRegistry.name(for: .twoFingerDoubleTap)
+        clearAllShortcutBindings()
+        KeyboardShortcuts.setShortcut(.init(.f15, modifiers: []), for: name)
+        defer { clearAllShortcutBindings() }
+
+        let state = makeState(
+            checker: MockPermissionChecker(accessibility: true),
+            preemptionController: controller,
+            systemGestureManager: systemGestureManager
+        )
+
+        state.refreshPermissions()
+
+        #expect(systemGestureManager.suppressedSettingKeys == ["TrackpadTwoFingerDoubleTapGesture"])
+        _ = preservedConfig
     }
 
     @Test @MainActor func middleClickSelectionUpdatesRuntimeActiveSlotsWithoutShortcut() {
+        let preservedConfig = GestureConfigurationPreserver()
         let runtime = RecordingGestureRuntime()
         clearAllShortcutBindings()
         defer { clearAllShortcutBindings() }
@@ -288,29 +430,37 @@ struct AppStateTests {
         state.handleShortcutConfigurationChange()
 
         #expect(runtime.activeSlotsHistory.last == [.threeFingerTap])
+        _ = preservedConfig
     }
 
     @Test @MainActor func systemGestureNoticeReflectsConflictState() {
+        let preservedConfig = GestureConfigurationPreserver()
         let state = makeState(checker: MockPermissionChecker())
         // Notice depends on whether system gestures are actually enabled on this machine.
         // Just verify it's a String? — the value depends on the test host's trackpad prefs.
         _ = state.systemGestureNotice
+        _ = preservedConfig
     }
 
     @Test @MainActor func supportedGestureSlotsMatchPreemptionPolicy() {
+        let preservedConfig = GestureConfigurationPreserver()
         let state = makeState(checker: MockPermissionChecker())
         let expected = PreemptionController().currentPolicy().supportedGestures.compactMap(GestureSlot.init(rawValue:))
         #expect(state.supportedGestureSlots == expected)
+        _ = preservedConfig
     }
 
     @Test @MainActor func supportedGestureSlotsIncludeAllSlots() {
+        let preservedConfig = GestureConfigurationPreserver()
         let state = makeState(checker: MockPermissionChecker())
         // PreemptionController returns all GestureSlot cases as supported.
         let expected = GestureSlot.allCases
         #expect(state.supportedGestureSlots == expected)
+        _ = preservedConfig
     }
 
     @Test @MainActor func handleAppLaunchPromptsAndTerminatesWhenPermissionsMissing() async {
+        let preservedConfig = GestureConfigurationPreserver()
         let checker = MockPermissionChecker(accessibility: false)
         let runtime = RecordingGestureRuntime()
         let state = makeState(checker: checker, runtime: runtime)
@@ -326,9 +476,11 @@ struct AppStateTests {
         #expect(runtime.startCallCount == 0)
         #expect(checker.requestAccessibilityCallCount == 1)
         #expect(terminateCallCount == 1)
+        _ = preservedConfig
     }
 
     @Test @MainActor func handleAppLaunchDoesNotPromptOrTerminateWhenPermissionsGranted() async {
+        let preservedConfig = GestureConfigurationPreserver()
         let checker = MockPermissionChecker(accessibility: true)
         let runtime = RecordingGestureRuntime()
         let state = makeState(checker: checker, runtime: runtime)
@@ -344,6 +496,7 @@ struct AppStateTests {
         #expect(runtime.startCallCount == 1)
         #expect(checker.requestAccessibilityCallCount == 0)
         #expect(terminateCallCount == 0)
+        _ = preservedConfig
     }
 
 }
@@ -493,6 +646,12 @@ final class MockPermissionChecker: PermissionChecking, @unchecked Sendable {
 @MainActor
 final class StubPreemptionController: PreemptionControlling {
     static let allEnabledSettings: [SystemGestureSetting] = [
+        SystemGestureSetting(
+            key: "TrackpadTwoFingerDoubleTapGesture",
+            title: "Smart Zoom (2-finger double-tap)",
+            isEnabled: true,
+            conflictingSlots: [.twoFingerDoubleTap]
+        ),
         SystemGestureSetting(
             key: "TrackpadThreeFingerHorizSwipeGesture",
             title: "Swipe between full-screen apps (3 fingers)",

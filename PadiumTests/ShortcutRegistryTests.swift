@@ -132,4 +132,20 @@ struct ShortcutRegistryTests {
         #expect(result.trackpadKeys == Set(["TrackpadThreeFingerHorizSwipeGesture"]))
         #expect(result.dockKeys.isEmpty)
     }
+
+    @Test @MainActor func smartZoomSuppressionLeavesDockKeysEnabled() {
+        let conflicting = [
+            SystemGestureSetting(
+                key: "TrackpadTwoFingerDoubleTapGesture",
+                title: "Smart Zoom (2-finger double-tap)",
+                isEnabled: true,
+                conflictingSlots: [.twoFingerDoubleTap]
+            )
+        ]
+
+        let result = SystemGestureManager.disabledPreferenceKeys(for: conflicting, allSettings: conflicting)
+
+        #expect(result.trackpadKeys == Set(["TrackpadTwoFingerDoubleTapGesture"]))
+        #expect(result.dockKeys.isEmpty)
+    }
 }

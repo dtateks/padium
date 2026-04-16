@@ -4,6 +4,7 @@ import Foundation
 
 // Tests for GestureEngine — lifecycle, policy filtering, and event pipeline.
 @MainActor
+@Suite(.serialized)
 struct GestureEngineTests {
     private let testSwipeThreshold: Float = 0.10
 
@@ -438,6 +439,143 @@ struct GestureEngineTests {
         )
 
         #expect(collector.events.map(\.slot) == [.threeFingerTap])
+
+        engine.stop()
+        await collectionTask.value
+    }
+
+    @Test func oneFingerSecondTapInsideWindowEmitsDoubleTapWithoutSingleTap() async {
+        let source = StubGestureSource()
+        let scheduler = ManualGestureScheduler()
+        let engine = makeEngine(
+            source: source,
+            supportedSlots: [.oneFingerDoubleTap],
+            scheduler: scheduler
+        )
+        engine.start()
+
+        let collector = EventCollector()
+        let collectionTask = collector.collect(from: engine.events)
+
+        await performTap(
+            source: source,
+            scheduler: scheduler,
+            frames: makeTapFrames(fingerCount: 1)
+        )
+        scheduler.advance(by: GestureTapSettings.doubleTapWindow + 0.01)
+        await flushPipeline()
+        #expect(collector.events.isEmpty)
+
+        await performTap(
+            source: source,
+            scheduler: scheduler,
+            frames: makeTapFrames(fingerCount: 1)
+        )
+        scheduler.advance(by: 0.10)
+        await performTap(
+            source: source,
+            scheduler: scheduler,
+            frames: makeTapFrames(fingerCount: 1)
+        )
+
+        #expect(collector.events.map(\.slot) == [.oneFingerDoubleTap])
+
+        engine.stop()
+        await collectionTask.value
+    }
+
+    @Test func twoFingerTapDoesNotEnableScrollSuppression() async {
+        let source = StubGestureSource()
+        let scheduler = ManualGestureScheduler()
+        let engine = makeEngine(
+            source: source,
+            supportedSlots: [.twoFingerDoubleTap],
+            scheduler: scheduler
+        )
+        engine.start()
+
+        source.yieldFrame(makeTapFrames(fingerCount: 2)[0])
+        await flushPipeline()
+
+        #expect(ScrollSuppressor.shared.currentFingerCount == 2)
+        #expect(ScrollSuppressor.shared.isMultitouchActive == false)
+
+        engine.stop()
+    }
+
+    @Test func twoFingerSecondTapInsideWindowEmitsDoubleTapWithoutSingleTap() async {
+        let source = StubGestureSource()
+        let scheduler = ManualGestureScheduler()
+        let engine = makeEngine(
+            source: source,
+            supportedSlots: [.twoFingerDoubleTap],
+            scheduler: scheduler
+        )
+        engine.start()
+
+        let collector = EventCollector()
+        let collectionTask = collector.collect(from: engine.events)
+
+        await performTap(
+            source: source,
+            scheduler: scheduler,
+            frames: makeTapFrames(fingerCount: 2)
+        )
+        scheduler.advance(by: GestureTapSettings.doubleTapWindow + 0.01)
+        await flushPipeline()
+        #expect(collector.events.isEmpty)
+
+        await performTap(
+            source: source,
+            scheduler: scheduler,
+            frames: makeTapFrames(fingerCount: 2)
+        )
+        scheduler.advance(by: 0.10)
+        await performTap(
+            source: source,
+            scheduler: scheduler,
+            frames: makeTapFrames(fingerCount: 2)
+        )
+
+        #expect(collector.events.map(\.slot) == [.twoFingerDoubleTap])
+
+        engine.stop()
+        await collectionTask.value
+    }
+
+    @Test func partialTwoFingerFramesDoNotFallBackToOneFingerDoubleTap() async {
+        let source = StubGestureSource()
+        let scheduler = ManualGestureScheduler()
+        let engine = makeEngine(
+            source: source,
+            supportedSlots: [.oneFingerDoubleTap, .twoFingerDoubleTap],
+            scheduler: scheduler
+        )
+        engine.start()
+
+        let collector = EventCollector()
+        let collectionTask = collector.collect(from: engine.events)
+
+        let partialTwoFingerFrame = [
+            TouchPoint(identifier: 1, normalizedX: 0.50, normalizedY: 0.50, pressure: 0.3, state: .touching, total: 0.15, majorAxis: 12.0),
+            TouchPoint(identifier: 2, normalizedX: 0.54, normalizedY: 0.50, pressure: 0.3, state: .hovering, total: 0.15, majorAxis: 12.0)
+        ]
+
+        await performTap(
+            source: source,
+            scheduler: scheduler,
+            frames: [partialTwoFingerFrame]
+        )
+        scheduler.advance(by: 0.10)
+        await performTap(
+            source: source,
+            scheduler: scheduler,
+            frames: [partialTwoFingerFrame]
+        )
+        scheduler.advance(by: GestureTapSettings.doubleTapWindow + 0.01)
+        await flushPipeline()
+
+        #expect(collector.events.isEmpty)
 
         engine.stop()
         await collectionTask.value
