@@ -1,6 +1,6 @@
 # Padium — Agent Memory
 
-**Updated:** 2026-04-15 00:00
+**Updated:** 2026-04-16 00:00
 **Commit:** 0e0c074
 **Branch:** unknown
 
@@ -20,15 +20,16 @@ Bundle ID: `com.padium`, version 0.1.0. LSUIElement=true (no Dock icon).
   ```
   scripts/run-dev.sh
   ```
-- Builds unsigned, copies to stable `~/Applications/Padium.app` (or `$PADIUM_INSTALL_DIR`), signs once with a stable Apple Development/Mac Development identity, then opens the installed copy.
+- Builds unsigned, replaces `/Applications/Padium.app` by default (or `$PADIUM_INSTALL_DIR`) by moving the built app into place, signs once with a stable Apple Development/Mac Development identity, then opens the installed copy.
 - Stable install path + stable signing identity avoids repeated Accessibility re-grants from changing signatures.
 - Launch without Accessibility permission immediately prompts, then terminates; relaunch after granting permission.
 - `PadiumApp` skips that launch prompt+quit path under XCTest so host-app tests can run.
 - After re-sign, `tccutil reset Accessibility com.padium` only if permissions are stale.
 - Requires granting Accessibility permission in System Settings.
 - App only disables macOS system trackpad gestures for Padium slots that currently have configured shortcuts; unbound slots leave the original macOS gestures enabled. `SystemGestureManager` persists a backup to UserDefaults so crash recovery can restore on next launch
+- `SystemGestureManager` also auto-suppresses Smart Zoom via `TrackpadTwoFingerDoubleTapGesture` when the configured 2-finger double-tap slot is in use
 - `SystemGestureManager` only disables Dock gesture keys when all enabled vertical system gestures are being suppressed; partial vertical suppression leaves the other finger-count variant enabled
-- `ScrollSuppressor` uses a CGEventTap to consume scroll wheel events while 3+ fingers are active on the trackpad, preventing 2-finger scroll from firing during 3-finger gestures; also suppresses momentum scroll after finger lift
+- `ScrollSuppressor` uses a CGEventTap to consume scroll wheel events while 3+ fingers are active on the trackpad, preventing 2-finger scroll from firing during 3-finger gestures; tap/click suppression still activates only at 3+ fingers and it also suppresses momentum scroll after finger lift
 
 ## Test
 - `xcodebuild -project Padium.xcodeproj -scheme Padium test`
@@ -61,9 +62,9 @@ PadiumApp (@main)
 - XCTest launch path bypasses that prompt+quit behavior so host-app tests can execute.
 - `GestureEngine` commits only when finger count and touch identifiers remain stable; after emission it suppresses duplicates until a lift frame
 - `GestureClassifier` requires stable touch identifiers, dominant-axis commitment, and per-finger direction agreement; vertical swipes tolerate lateral drift while the dominant axis stays vertical
-- `GestureEngine` arbitrates tap vs double-tap recognition from raw touch frames; 3-finger and 4-finger clicks/double-clicks are experimental and emitted only when the finger-count-specific thresholds are met
+- `GestureEngine` arbitrates tap vs double-tap recognition from raw touch frames; configured tap finger counts now include 1-finger and 2-finger double-tap slots in addition to the existing experimental 3-finger and 4-finger tap/double-tap slots
 - Shared sensitivity changes apply immediately without restarting the runtime for swipes only; `GestureClassifier` reads the current threshold live. UI sensitivity applies a +20 point base boost before threshold mapping, so default 50% behaves like the previous 70% calibration
-- `AppState` updates active slots from recorder `onChange` callbacks before runtime decisions; shortcut-binding changes must refresh conflict state and gesture routing together
+- `AppState` refreshes live runtime/config state from `UserDefaults` changes; shortcut-binding changes must refresh conflict state and gesture routing together
 - `ShortcutRegistry.name(for:)` is the SINGLE source of truth for slot→`KeyboardShortcuts.Name` mapping — no ad-hoc Name creation elsewhere
 - Settings window: app launch starts permission polling immediately; menu-bar selection explicitly calls `openWindow(id: "settings")` and focuses the existing window; `onDisappear` resets `isSettingsPresented` to `false`
 - Permissions revoked while running → `refreshPermissions()` stops the runtime

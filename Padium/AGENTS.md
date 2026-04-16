@@ -10,7 +10,7 @@
 | GestureClassifier.swift | Classification | Stable touch IDs, dominant-axis commitment, per-finger direction agreement, lateral-drift tolerance on vertical swipes |
 | GestureSource.swift | Protocol + types | `GestureSource` protocol, `TouchPoint` struct, `OMSTouchState` enum — boundary above OMS |
 | GestureEvent.swift | Data | `GestureEvent(slot:timestamp:)` — emitted by engine |
-| GestureSlot.swift | Enum | 12 gesture slots (8 swipes + 4 experimental tap/double-tap), `displayName`/`sectionTitle` for UI grouping |
+| GestureSlot.swift | Enum | Gesture slots include 1-finger and 2-finger double-tap alongside swipe and higher-finger tap/double-tap slots; `displayName`/`sectionTitle` for UI grouping |
 | OMSGestureSource.swift | Hardware bridge | `OMSManager.shared` → `AsyncStream<[TouchPoint]>`, `@unchecked Sendable` |
 | ShortcutEmitter.swift | Key posting | `CGEventShortcutSender` posts explicit modifier transitions + key events via `.cghidEventTap` |
 | ShortcutRegistry.swift | Name mapping | `"gesture.\(slot.rawValue)"` pattern — single source of truth |
@@ -18,7 +18,7 @@
 | PreemptionController.swift | Conflict detection | Reads `com.apple.AppleMultitouchTrackpad` domain, filters conflicts down to currently configured GestureSlots, `openTrackpadSettings()` deep-links to System Settings |
 | SystemGestureManager.swift | Gesture suppression | `suppress(conflictingSettings:allSettings:)` selectively disables matching macOS gesture prefs via `defaults write` + `killall Dock`; Dock keys disable only when all enabled vertical gestures are suppressed; `restore()` writes back originals; backup in UserDefaults for crash recovery |
 | ScrollSuppressor.swift | Scroll + click suppression | CGEventTap on `.scrollWheel`, `.leftMouseDown`, and `.leftMouseUp`; consumes scroll events while 3+ fingers active, converts configured physical 3-finger clicks to middle click, and suppresses duplicate left clicks after tap-path middle clicks |
-| SettingsView.swift | UI | Groups slots by `sectionTitle`, shows per-row conflict warnings + experimental tap caveat, sensitivity copy limited to swipes |
+| SettingsView.swift | UI | Groups slots by `sectionTitle`, shows per-row conflict warnings + experimental tap caveat, sensitivity copy limited to swipes; copy mentions Smart Zoom among experimental tap conflicts |
 | PermissionsView.swift | UI | Accessibility status + per-system-gesture conflict list + "Open Trackpad Settings" + "Refresh" |
 | GestureRowView.swift | UI | `KeyboardShortcuts.Recorder(for:)` per slot, shows conflict warning via `isConflicting` flag |
 | Logger.swift | Logging | `PadiumLogger` enum: `.gesture`, `.shortcut`, `.permission` categories |
@@ -27,13 +27,13 @@
 - `OMSGestureSource` is `@unchecked Sendable` — mutable state accessed only from its internal Task; do not add shared mutable state without synchronization
 - `GestureClassifier` applies a +20 point base boost before threshold mapping; swipe thresholds range 0.04-0.10 (previous 0.06-0.14), so default 50% behaves like the previous 70% calibration; shared sensitivity remaps swipe thresholds only and is read live without an AppState runtime restart
 - `GestureClassifier` tolerates lateral drift on vertical swipes while preserving dominant-axis commitment and per-finger agreement
-- `GestureEngine` ignores frames after a committed gesture until a lift frame clears the candidate; tap/double-tap recognition is experimental and derived from raw touch frames
+- `GestureEngine` ignores frames after a committed gesture until a lift frame clears the candidate; tap/double-tap recognition is experimental and now requires stable full-finger contact sets per raw frame before tap tracking, preferring drop over cross-finger-count misfire
 - `PermissionCoordinator` polling is owned by `AppState` from app launch so permission revocation can stop the runtime even while settings is closed
 - Launch without Accessibility permission immediately prompts, then terminates; `PadiumApp` bypasses that path under XCTest so host-app tests can run
-- `AppState` updates active slots from recorder `onChange` callbacks before routing decisions; shortcut-binding changes must refresh conflict state and gesture routing together
+- `AppState` refreshes active slots and live runtime/config state from `UserDefaults` changes; shortcut-binding changes must refresh conflict state and gesture routing together
 - Menu-bar selection explicitly focuses the existing settings window rather than spawning duplicates
 - `PreemptionController.conflictingSlots(for:)` returns only the currently configured Padium slots that still conflict with enabled system gestures; `AppState` refreshes this after permission and shortcut-binding changes
-- OMS reads raw touches in parallel with macOS — it cannot suppress system gesture recognizers; `SystemGestureManager` handles system gesture prefs (Mission Control, Spaces, App Exposé); Dock keys are only disabled when all enabled vertical gestures are suppressed, not when a single finger-count variant is suppressed. `ScrollSuppressor` handles scroll-during-multitouch via CGEventTap
+- OMS reads raw touches in parallel with macOS — it cannot suppress system gesture recognizers; `SystemGestureManager` handles system gesture prefs (Mission Control, Spaces, App Exposé); Dock keys are only disabled when all enabled vertical gestures are suppressed, not when a single finger-count variant is suppressed. `ScrollSuppressor` handles scroll-during-multitouch via CGEventTap and still activates only for 3+ active fingers
 - `ScrollSuppressor.isMultitouchActive` and `currentFingerCount` are set from `GestureEngine`'s pipeline task (which runs on an arbitrary thread from OMS); both use the same `os_unfair_lock`-protected state read by the CGEventTap callback for scroll suppression and physical click conversion
 - Physical 3-finger click conversion only consults `GestureActionStore.actionKind(for: .threeFingerTap)`; tap-path middle clicks register a dedup window so the follow-up left click is swallowed instead of generating a second middle click
 - Momentum scroll events after finger lift are also suppressed until the momentum phase ends
