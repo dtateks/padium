@@ -1,0 +1,126 @@
+#!/usr/bin/env bash
+# Fast-lane publisher: when pushing to main, build the native-arch release
+# zip locally and upload it to a local-<shortsha> GitHub release before the
+# push completes. CI then fills in the missing architecture.
+#
+# Install with: bash scripts/install-hooks.sh
+#
+# Bypass once with: PADIUM_SKIP_PRE_PUSH_RELEASE=1 git push
+
+set -euo pipefail
+
+RELEASE_BRANCH="main"
+REMOTE_NAME_DEFAULT="origin"
+BUILD_SCRIPT="scripts/build-release.sh"
+HOOK_GUARD_VAR="PADIUM_SKIP_PRE_PUSH_RELEASE"
+
+local_release_tag() {
+  printf 'local-%s' "$(git rev-parse --short=7 HEAD)"
+}
+
+asset_name_for_arch() {
+  case "$(uname -m)" in
+    arm64|aarch64) printf 'Padium-darwin-arm64.zip' ;;
+    x86_64) printf 'Padium-darwin-x64.zip' ;;
+    *) echo "Unsupported host architecture: $(uname -m)" >&2; exit 1 ;;
+  esac
+}
+
+ensure_release_branch_push() {
+  local ref_file="$1"
+  grep -q "refs/heads/${RELEASE_BRANCH}" "$ref_file"
+}
+
+ensure_clean_working_tree() {
+  if [[ -n "$(git status --porcelain)" ]]; then
+    echo "Pre-push release: working tree must be clean" >&2
+    exit 1
+  fi
+}
+
+ensure_gh_ready() {
+  if ! command -v gh >/dev/null 2>&1; then
+    echo "Pre-push release: gh CLI is required (brew install gh)" >&2
+    exit 1
+  fi
+  if ! gh auth status >/dev/null 2>&1; then
+    echo "Pre-push release: gh CLI must be authenticated (gh auth login)" >&2
+    exit 1
+  fi
+}
+
+build_asset() {
+  local asset_name="$1"
+  bash "$BUILD_SCRIPT" "$asset_name"
+}
+
+ensure_local_tag_points_at_head() {
+  local tag="$1"
+  local head_oid tag_oid
+
+  head_oid="$(git rev-parse HEAD)"
+  if git rev-parse --verify --quiet "$tag" >/dev/null; then
+    tag_oid="$(git rev-list -n 1 "$tag")"
+    if [[ "$tag_oid" != "$head_oid" ]]; then
+      echo "Pre-push release: tag $tag does not point at HEAD" >&2
+      exit 1
+    fi
+  else
+    git tag "$tag"
+  fi
+}
+
+push_release_tag() {
+  local remote_name="$1"
+  local tag="$2"
+  git push --no-verify "$remote_name" "refs/tags/${tag}:refs/tags/${tag}"
+}
+
+publish_local_release() {
+  local tag="$1"
+  local asset_name="$2"
+  if gh release view "$tag" >/dev/null 2>&1; then
+    gh release upload "$tag" "$asset_name" --clobber
+  else
+    gh release create "$tag" "$asset_name" \
+      --title "Padium $tag" \
+      --generate-notes \
+      --latest
+  fi
+}
+
+main() {
+  local remote_name="${1:-$REMOTE_NAME_DEFAULT}"
+  local ref_file tag asset_name
+
+  if [[ "${!HOOK_GUARD_VAR:-}" == "1" ]]; then
+    exit 0
+  fi
+
+  ref_file="$(mktemp)"
+  trap 'rm -f "$ref_file"' EXIT
+  cat > "$ref_file"
+
+  if ! ensure_release_branch_push "$ref_file"; then
+    exit 0
+  fi
+
+  printf -v "$HOOK_GUARD_VAR" '%s' "1"
+  export "$HOOK_GUARD_VAR"
+
+  ensure_clean_working_tree
+  ensure_gh_ready
+
+  asset_name="$(asset_name_for_arch)"
+  build_asset "$asset_name"
+
+  tag="$(local_release_tag)"
+  ensure_local_tag_points_at_head "$tag"
+  push_release_tag "$remote_name" "$tag"
+
+  if ! publish_local_release "$tag" "$asset_name"; then
+    echo "WARN: pre-push release publication failed; CI will fall back to a full build." >&2
+  fi
+}
+
+main "$@"
