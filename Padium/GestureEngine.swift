@@ -61,11 +61,10 @@ final class GestureEngine {
         // is reached we never downgrade — intermediate lower-finger frames
         // during landing/lift transitions belong to the same gesture.
         let peakFingerCount: Int
+        // The time the current peak was reached (or the candidate was created).
+        // Re-anchored on every peak upgrade and on ID churn at the same peak.
         let startedAt: Date
         var maximumTravel: Float = 0
-        // Consecutive frames seen at the peak count with matching identifiers.
-        // Resets when the candidate is re-anchored (upgrade or ID churn).
-        var stableFrameCount: Int = 1
 
         var trackedIdentifiers: Set<Int> {
             Set(originContacts.keys)
@@ -79,10 +78,6 @@ final class GestureEngine {
                     GestureClassifier.travelDistance(from: startPoint, to: currentPoint)
                 )
             }
-        }
-
-        mutating func incrementStability() {
-            stableFrameCount += 1
         }
 
         func duration(at timestamp: Date) -> TimeInterval {
@@ -103,12 +98,15 @@ final class GestureEngine {
         }
     }
 
-    // Frames required at the peak finger count before a swipe is committed.
-    // Two frames is the minimum for displacement to exist (one origin + one
-    // current); the third frame buys ~1 OMS frame of tolerance for trailing
-    // landing fingers, preventing a 4-finger swipe from firing as a 3-finger
-    // swipe in the brief window before the 4th finger lands.
-    private static let minimumStableFramesForSwipe: Int = 3
+    // Wall-clock window the candidate must hold at its peak before a swipe
+    // commits when a higher finger count is still configured (i.e. an upgrade
+    // is still possible). This is the libinput-style "wait for additional
+    // fingers" gate: at 80 ms it sits between libinput's 40 ms quick-floor
+    // and its 150 ms swipe default, sized for Padium's bounded peak (max 4
+    // fingers) and the empirical ~20–60 ms multi-finger landing spread on
+    // macOS trackpads. Time-based (not frame-based) so the behavior is
+    // independent of OMS frame rate (90–120 Hz across hardware).
+    private static let peakUpgradeSettleWindow: TimeInterval = 0.080
 
     private let source: any GestureSource
     private let classifierFactory: @Sendable () -> GestureClassifier
@@ -293,15 +291,17 @@ final class GestureEngine {
                 }
 
                 var updatedCandidate = activeCandidate
-                updatedCandidate.incrementStability()
                 updatedCandidate.recordTravel(using: contacts)
 
-                // Defer swipe classification until the candidate has stayed
-                // at the peak for a minimum number of consecutive frames.
-                // Without this gate, a fast 4-finger swipe can fire as a
-                // 3-finger swipe in the brief window before the 4th finger
-                // lands.
-                if updatedCandidate.stableFrameCount >= Self.minimumStableFramesForSwipe,
+                // Defer swipe classification while a higher finger count is
+                // still possible AND the peak hasn't held long enough for
+                // the trailing landing finger to arrive. Once the gate is
+                // open (or no upgrade is possible), commit on motion alone.
+                let settleSatisfied = self.swipeSettleSatisfied(
+                    for: updatedCandidate,
+                    now: self.scheduler.now
+                )
+                if settleSatisfied,
                    let event = localClassifier.classifyIncremental(
                        firstContacts: updatedCandidate.originContacts,
                        currentContacts: contacts,
@@ -332,6 +332,19 @@ final class GestureEngine {
 
     private func hasActiveSlots(for fingerCount: Int) -> Bool {
         activeSlots.contains { $0.fingerCount == fingerCount }
+    }
+
+    private func swipeSettleSatisfied(
+        for candidate: GestureCandidate,
+        now: Date
+    ) -> Bool {
+        let maxConfiguredFingerCount = activeSlots.map(\.fingerCount).max() ?? candidate.peakFingerCount
+        // Peak already at the max configured count → no upgrade possible,
+        // commit as soon as classifyIncremental sees enough motion.
+        guard candidate.peakFingerCount < maxConfiguredFingerCount else { return true }
+        // Otherwise hold until the candidate has stayed at the peak for the
+        // settle window, giving any trailing landing finger time to arrive.
+        return candidate.duration(at: now) >= Self.peakUpgradeSettleWindow
     }
 
     private func tapActivation(for fingerCount: Int) -> TapActivation {

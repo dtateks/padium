@@ -123,23 +123,20 @@ struct GestureEngineTests {
         startX: Float, startY: Float,
         endX: Float, endY: Float
     ) -> [[TouchPoint]] {
-        // Three frames so the engine reaches its minimum stable-frame
-        // requirement at the peak finger count before classifying a swipe.
-        let midX = (startX + endX) / 2
-        let midY = (startY + endY) / 2
-        let start = (0..<fingerCount).map { i in
-            TouchPoint(identifier: i + 1, normalizedX: startX, normalizedY: startY,
-                       pressure: 0.3, state: .touching, total: 0.15, majorAxis: 12.0)
+        // Six frames so even the engine's extended stable-frame window
+        // (used when the peak is below the highest configured finger count)
+        // reaches the classification gate before the lift frame.
+        let frameCount = 6
+        let span = Float(frameCount - 1)
+        return (0..<frameCount).map { i in
+            let progress = Float(i) / span
+            let x = startX + (endX - startX) * progress
+            let y = startY + (endY - startY) * progress
+            return (0..<fingerCount).map { id in
+                TouchPoint(identifier: id + 1, normalizedX: x, normalizedY: y,
+                           pressure: 0.3, state: .touching, total: 0.15, majorAxis: 12.0)
+            }
         }
-        let mid = (0..<fingerCount).map { i in
-            TouchPoint(identifier: i + 1, normalizedX: midX, normalizedY: midY,
-                       pressure: 0.3, state: .touching, total: 0.15, majorAxis: 12.0)
-        }
-        let end = (0..<fingerCount).map { i in
-            TouchPoint(identifier: i + 1, normalizedX: endX, normalizedY: endY,
-                       pressure: 0.3, state: .touching, total: 0.15, majorAxis: 12.0)
-        }
-        return [start, mid, end]
     }
 
     private func makeTapFrames(
@@ -175,15 +172,21 @@ struct GestureEngineTests {
 
     // Deterministic collection: yields frames + lift, stops the engine, then
     // drains the passed-in stream (which terminates when the pipeline task exits).
+    // When a `ManualGestureScheduler` is provided the wall clock is advanced by
+    // `framePeriod` after each frame so the engine's time-based settle window
+    // (`peakUpgradeSettleWindow`) can elapse deterministically without `Task.sleep`.
     private func driveAndCollect(
         engine: GestureEngine,
         source: StubGestureSource,
+        scheduler: ManualGestureScheduler? = nil,
+        framePeriod: TimeInterval = 0.020,
         frames: [[TouchPoint]],
         eventsStream: AsyncStream<GestureEvent>
     ) async -> [GestureEvent] {
         for frame in frames {
             source.yieldFrame(frame)
             await flushPipeline()
+            scheduler?.advance(by: framePeriod)
         }
         source.yieldFrame([]) // lift — triggers classification
         await flushPipeline()
@@ -293,12 +296,14 @@ struct GestureEngineTests {
 
     @Test func eventsStreamEmitsClassifiedGesture() async {
         let source = StubGestureSource()
-        let engine = makeEngine(source: source)
+        let scheduler = ManualGestureScheduler()
+        let engine = makeEngine(source: source, scheduler: scheduler)
         engine.start()
         let eventsStream = engine.events
 
         let frames = makeSwipeFrames(fingerCount: 3, startX: 0.1, startY: 0.5, endX: 0.9, endY: 0.5)
         let received = await driveAndCollect(engine: engine, source: source,
+                                             scheduler: scheduler,
                                              frames: frames, eventsStream: eventsStream)
 
         #expect(received.count == 1)
@@ -402,13 +407,88 @@ struct GestureEngineTests {
         #expect(received.isEmpty)
     }
 
+    // When no higher-finger gesture is configured, the 3-finger candidate
+    // commits on the minimum stability window with no extended wait — there
+    // is no upgrade path to protect against, so the latency budget stays small.
+    @Test func threeFingerOnlyConfigCommitsWithoutSettleDelay() async {
+        let source = StubGestureSource()
+        let scheduler = ManualGestureScheduler()
+        let threeFingerSlots = Set(GestureSlot.allCases.filter { $0.fingerCount == 3 })
+        let engine = makeEngine(source: source, supportedSlots: threeFingerSlots, scheduler: scheduler)
+        engine.start()
+        let eventsStream = engine.events
+
+        func point(_ id: Int, x: Float) -> TouchPoint {
+            TouchPoint(identifier: id, normalizedX: x, normalizedY: 0.5,
+                       pressure: 0.3, state: .touching, total: 0.15, majorAxis: 12.0)
+        }
+        // Two frames are enough for displacement; the wall clock is not
+        // advanced. Without a higher finger count configured the engine has
+        // no reason to wait for an upgrade, so the swipe must commit on
+        // motion alone.
+        let f1 = (1...3).map { point($0, x: 0.10) }
+        let f2 = (1...3).map { point($0, x: 0.90) }
+
+        let received = await driveAndCollect(
+            engine: engine,
+            source: source,
+            frames: [f1, f2],
+            eventsStream: eventsStream
+        )
+
+        #expect(received.map(\.slot) == [.threeFingerSwipeRight])
+    }
+
+    // Regression: when 4-finger gestures are also configured, the 3-finger
+    // candidate must hold past the upgrade settle window so the 4th finger
+    // has time to land even on slower hand placements. Five 3-finger frames
+    // with motion that would clear the swipe threshold must NOT pre-empt
+    // a 4-finger swipe that follows. The wall clock is intentionally NOT
+    // advanced for the 3-finger frames — proving the gate is closed by
+    // duration, not by frame count.
+    @Test func slowFourthFingerLandingAfterMultipleStableThreeFingerFramesDoesNotFireThreeFingerSwipe() async {
+        let source = StubGestureSource()
+        let scheduler = ManualGestureScheduler()
+        let engine = makeEngine(source: source, scheduler: scheduler)
+        engine.start()
+        let eventsStream = engine.events
+
+        func point(_ id: Int, x: Float) -> TouchPoint {
+            TouchPoint(identifier: id, normalizedX: x, normalizedY: 0.5,
+                       pressure: 0.3, state: .touching, total: 0.15, majorAxis: 12.0)
+        }
+
+        let three1 = (1...3).map { point($0, x: 0.10) }
+        let three2 = (1...3).map { point($0, x: 0.20) }
+        let three3 = (1...3).map { point($0, x: 0.30) }
+        let three4 = (1...3).map { point($0, x: 0.40) }
+        let three5 = (1...3).map { point($0, x: 0.50) }
+        // 4th finger lands; all four continue to a clear 4-finger swipe.
+        let four1 = (1...4).map { point($0, x: 0.60) }
+        let four2 = (1...4).map { point($0, x: 0.75) }
+        let four3 = (1...4).map { point($0, x: 0.90) }
+
+        let received = await driveAndCollect(
+            engine: engine,
+            source: source,
+            scheduler: scheduler,
+            framePeriod: 0,  // pin wall clock — only peak == max should commit
+            frames: [three1, three2, three3, three4, three5, four1, four2, four3],
+            eventsStream: eventsStream
+        )
+
+        #expect(received.map(\.slot) == [.fourFingerSwipeRight])
+    }
+
     // Regression: a 4-finger swipe whose 4th finger lands a frame after the
     // first three must not be misclassified as a 3-finger swipe during the
     // brief landing window. The engine should re-anchor to the 4-finger
-    // peak and fire only the 4-finger swipe.
+    // peak and fire only the 4-finger swipe. Wall clock pinned to prove
+    // the time-based settle holds the 3-finger commit closed.
     @Test func gradualFourFingerLandingDoesNotMisfireAsThreeFingerSwipe() async {
         let source = StubGestureSource()
-        let engine = makeEngine(source: source)
+        let scheduler = ManualGestureScheduler()
+        let engine = makeEngine(source: source, scheduler: scheduler)
         engine.start()
         let eventsStream = engine.events
 
@@ -429,6 +509,8 @@ struct GestureEngineTests {
         let received = await driveAndCollect(
             engine: engine,
             source: source,
+            scheduler: scheduler,
+            framePeriod: 0,
             frames: [threeStart, threeMid, fourA, fourB, fourC],
             eventsStream: eventsStream
         )
@@ -557,7 +639,8 @@ struct GestureEngineTests {
 
     @Test func engineSuppressesDuplicateFramesUntilLift() async {
         let source = StubGestureSource()
-        let engine = makeEngine(source: source)
+        let scheduler = ManualGestureScheduler()
+        let engine = makeEngine(source: source, scheduler: scheduler)
         engine.start()
         let eventsStream = engine.events
 
@@ -570,17 +653,28 @@ struct GestureEngineTests {
         }
 
         let frames = makeSwipeFrames(fingerCount: 3, startX: 0.1, startY: 0.5, endX: 0.9, endY: 0.5)
+        let framePeriod: TimeInterval = 0.020
 
-        for frame in frames { source.yieldFrame(frame) }
-        await flushPipeline()
+        for frame in frames {
+            source.yieldFrame(frame)
+            await flushPipeline()
+            scheduler.advance(by: framePeriod)
+        }
 
-        for frame in frames { source.yieldFrame(frame) }
-        await flushPipeline()
+        for frame in frames {
+            source.yieldFrame(frame)
+            await flushPipeline()
+            scheduler.advance(by: framePeriod)
+        }
 
         source.yieldFrame([])
         await flushPipeline()
 
-        for frame in frames { source.yieldFrame(frame) }
+        for frame in frames {
+            source.yieldFrame(frame)
+            await flushPipeline()
+            scheduler.advance(by: framePeriod)
+        }
         source.yieldFrame([])
         await flushPipeline()
         engine.stop()
@@ -1001,12 +1095,14 @@ struct GestureEngineTests {
 
     @Test func engineCanRestartAfterStop() async {
         let source = StubGestureSource()
-        let engine = makeEngine(source: source)
+        let scheduler = ManualGestureScheduler()
+        let engine = makeEngine(source: source, scheduler: scheduler)
 
         engine.start()
         let firstStream = engine.events
         let frames = makeSwipeFrames(fingerCount: 3, startX: 0.1, startY: 0.5, endX: 0.9, endY: 0.5)
         let firstRun = await driveAndCollect(engine: engine, source: source,
+                                             scheduler: scheduler,
                                              frames: frames, eventsStream: firstStream)
         #expect(firstRun.count == 1)
 
@@ -1016,6 +1112,7 @@ struct GestureEngineTests {
 
         let secondStream = engine.events
         let secondRun = await driveAndCollect(engine: engine, source: source,
+                                              scheduler: scheduler,
                                               frames: frames, eventsStream: secondStream)
         #expect(secondRun.count == 1)
         #expect(secondRun.first?.slot == .threeFingerSwipeRight)
