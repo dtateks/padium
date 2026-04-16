@@ -2,7 +2,7 @@
 # Build a release Padium.app universal bundle (arm64 + x86_64) and zip it.
 #
 # Inputs:
-#   $1 (optional) — output zip path. Defaults to ./Padium-macos.zip in the repo root.
+#   $1 (required) — output zip path.
 #
 # Outputs:
 #   <output-zip>                              — ditto archive containing Padium.app
@@ -18,7 +18,14 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 BUILD_DIR="$ROOT_DIR/build"
 APP_PATH="$BUILD_DIR/Build/Products/Release/Padium.app"
-OUTPUT_ZIP="${1:-$ROOT_DIR/Padium-macos.zip}"
+
+if [[ $# -ne 1 ]]; then
+	echo "Usage: $0 <output-zip-path>" >&2
+	exit 1
+fi
+
+OUTPUT_ZIP="$1"
+mkdir -p "$(dirname "$OUTPUT_ZIP")"
 
 if [[ "$(uname -s)" != "Darwin" ]]; then
 	echo "build-release.sh must run on macOS (uses xcodebuild)" >&2

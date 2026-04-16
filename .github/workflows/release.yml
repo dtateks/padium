@@ -52,6 +52,12 @@ jobs:
         if: steps.plan.outputs.skip_build == 'false'
         run: bash scripts/build-release.sh "$ASSET_NAME"
 
+      - name: Promote cache release to latest
+        if: steps.plan.outputs.skip_build == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release edit "${{ steps.plan.outputs.release_tag }}" --latest
+
       - name: Publish release asset
         if: steps.plan.outputs.skip_build == 'false'
         uses: softprops/action-gh-release@v2
