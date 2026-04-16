@@ -123,15 +123,23 @@ struct GestureEngineTests {
         startX: Float, startY: Float,
         endX: Float, endY: Float
     ) -> [[TouchPoint]] {
+        // Three frames so the engine reaches its minimum stable-frame
+        // requirement at the peak finger count before classifying a swipe.
+        let midX = (startX + endX) / 2
+        let midY = (startY + endY) / 2
         let start = (0..<fingerCount).map { i in
             TouchPoint(identifier: i + 1, normalizedX: startX, normalizedY: startY,
+                       pressure: 0.3, state: .touching, total: 0.15, majorAxis: 12.0)
+        }
+        let mid = (0..<fingerCount).map { i in
+            TouchPoint(identifier: i + 1, normalizedX: midX, normalizedY: midY,
                        pressure: 0.3, state: .touching, total: 0.15, majorAxis: 12.0)
         }
         let end = (0..<fingerCount).map { i in
             TouchPoint(identifier: i + 1, normalizedX: endX, normalizedY: endY,
                        pressure: 0.3, state: .touching, total: 0.15, majorAxis: 12.0)
         }
-        return [start, end]
+        return [start, mid, end]
     }
 
     private func makeTapFrames(
@@ -392,6 +400,159 @@ struct GestureEngineTests {
         )
 
         #expect(received.isEmpty)
+    }
+
+    // Regression: a 4-finger swipe whose 4th finger lands a frame after the
+    // first three must not be misclassified as a 3-finger swipe during the
+    // brief landing window. The engine should re-anchor to the 4-finger
+    // peak and fire only the 4-finger swipe.
+    @Test func gradualFourFingerLandingDoesNotMisfireAsThreeFingerSwipe() async {
+        let source = StubGestureSource()
+        let engine = makeEngine(source: source)
+        engine.start()
+        let eventsStream = engine.events
+
+        func point(_ id: Int, x: Float) -> TouchPoint {
+            TouchPoint(identifier: id, normalizedX: x, normalizedY: 0.5,
+                       pressure: 0.3, state: .touching, total: 0.15, majorAxis: 12.0)
+        }
+
+        // Three fingers detected first, already swiping fast enough that the
+        // pre-fix engine would commit a 3-finger swipe before the 4th lands.
+        let threeStart = (1...3).map { point($0, x: 0.10) }
+        let threeMid = (1...3).map { point($0, x: 0.40) }
+        // 4th finger arrives, all four continue the swipe to completion.
+        let fourA = (1...4).map { point($0, x: 0.50) }
+        let fourB = (1...4).map { point($0, x: 0.70) }
+        let fourC = (1...4).map { point($0, x: 0.90) }
+
+        let received = await driveAndCollect(
+            engine: engine,
+            source: source,
+            frames: [threeStart, threeMid, fourA, fourB, fourC],
+            eventsStream: eventsStream
+        )
+
+        #expect(received.map(\.slot) == [.fourFingerSwipeRight])
+    }
+
+    // Regression: a sub-threshold 4-finger gesture that lifts one finger at
+    // a time must not register as a 2- or 3-finger tap. The candidate's
+    // peak count locks to 4, so any tap recognition on lift maps to the
+    // 4-finger slot — never a smaller-finger slot from the lift artifact.
+    @Test func sequentialLiftDoesNotMisfireFourFingerGestureAsLowerFingerTap() async {
+        let source = StubGestureSource()
+        let scheduler = ManualGestureScheduler()
+        let engine = makeEngine(
+            source: source,
+            supportedSlots: [
+                .fourFingerSwipeRight, .fourFingerSwipeLeft,
+                .twoFingerDoubleTap, .threeFingerDoubleTap, .fourFingerDoubleTap
+            ],
+            scheduler: scheduler
+        )
+        engine.start()
+
+        let collector = EventCollector()
+        let collectionTask = collector.collect(from: engine.events)
+
+        func point(_ id: Int, x: Float) -> TouchPoint {
+            TouchPoint(identifier: id, normalizedX: x, normalizedY: 0.5,
+                       pressure: 0.3, state: .touching, total: 0.15, majorAxis: 12.0)
+        }
+
+        // Two consecutive sub-threshold 4-finger gestures with sequential lifts.
+        // Without the fix, the lift transitions reset the candidate down to 2
+        // fingers and the second lift completes a spurious 2-finger double tap.
+        for _ in 0..<2 {
+            source.yieldFrame((1...4).map { point($0, x: 0.50) })
+            await flushPipeline()
+            source.yieldFrame((1...4).map { point($0, x: 0.51) })
+            await flushPipeline()
+            source.yieldFrame((1...4).map { point($0, x: 0.52) })
+            await flushPipeline()
+            source.yieldFrame((1...3).map { point($0, x: 0.52) })
+            await flushPipeline()
+            source.yieldFrame((1...2).map { point($0, x: 0.52) })
+            await flushPipeline()
+            scheduler.advance(by: 0.05)
+            source.yieldFrame([])
+            await flushPipeline()
+            scheduler.advance(by: 0.10)
+        }
+
+        engine.stop()
+        await collectionTask.value
+
+        let receivedSlots = Set(collector.events.map(\.slot))
+        #expect(!receivedSlots.contains(.twoFingerDoubleTap))
+        #expect(!receivedSlots.contains(.threeFingerDoubleTap))
+    }
+
+    // Regression: a real 4-finger swipe followed by sequential lift must not
+    // leak a smaller-finger pending tap. After the swipe fires, the candidate
+    // is cleared and waitingForLift is true — subsequent partial-finger frames
+    // during the lift must not register taps that could later combine into
+    // an unintended double tap.
+    @Test func fourFingerSwipeLiftDoesNotRegisterLowerFingerPendingTap() async {
+        let source = StubGestureSource()
+        let scheduler = ManualGestureScheduler()
+        let engine = makeEngine(
+            source: source,
+            supportedSlots: [
+                .fourFingerSwipeRight, .twoFingerDoubleTap,
+                .threeFingerDoubleTap, .fourFingerDoubleTap
+            ],
+            scheduler: scheduler
+        )
+        engine.start()
+
+        let collector = EventCollector()
+        let collectionTask = collector.collect(from: engine.events)
+
+        func point(_ id: Int, x: Float) -> TouchPoint {
+            TouchPoint(identifier: id, normalizedX: x, normalizedY: 0.5,
+                       pressure: 0.3, state: .touching, total: 0.15, majorAxis: 12.0)
+        }
+
+        // 4-finger swipe right (3 frames to clear minimum stable count).
+        source.yieldFrame((1...4).map { point($0, x: 0.10) })
+        await flushPipeline()
+        source.yieldFrame((1...4).map { point($0, x: 0.50) })
+        await flushPipeline()
+        source.yieldFrame((1...4).map { point($0, x: 0.90) })
+        await flushPipeline()
+
+        // Sequential lift through 3 → 2 → empty.
+        source.yieldFrame((1...3).map { point($0, x: 0.90) })
+        await flushPipeline()
+        source.yieldFrame((1...2).map { point($0, x: 0.90) })
+        await flushPipeline()
+        scheduler.advance(by: 0.05)
+        source.yieldFrame([])
+        await flushPipeline()
+
+        // Within the double-tap window, perform a real 2-finger double tap.
+        // The pending-tap state must be clean of any 2-finger artifact, so
+        // this should require two distinct 2-finger taps to fire — and it
+        // should fire on its own merits without the swipe lift contaminating it.
+        scheduler.advance(by: 0.10)
+        source.yieldFrame([
+            point(1, x: 0.40),
+            point(2, x: 0.50)
+        ])
+        await flushPipeline()
+        scheduler.advance(by: 0.05)
+        source.yieldFrame([])
+        await flushPipeline()
+        // Only one 2-finger tap so far → no double tap should fire yet.
+        #expect(!collector.events.map(\.slot).contains(.twoFingerDoubleTap))
+
+        engine.stop()
+        await collectionTask.value
+
+        let slots = collector.events.map(\.slot)
+        #expect(slots == [.fourFingerSwipeRight])
     }
 
     @Test func engineSuppressesDuplicateFramesUntilLift() async {

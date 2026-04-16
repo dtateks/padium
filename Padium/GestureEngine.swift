@@ -57,9 +57,15 @@ final class TaskScheduledWork: GestureScheduledWork {
 final class GestureEngine {
     private struct GestureCandidate {
         let originContacts: [Int: TouchPoint]
-        let fingerCount: Int
+        // The highest finger count observed for this candidate. Once a peak
+        // is reached we never downgrade — intermediate lower-finger frames
+        // during landing/lift transitions belong to the same gesture.
+        let peakFingerCount: Int
         let startedAt: Date
         var maximumTravel: Float = 0
+        // Consecutive frames seen at the peak count with matching identifiers.
+        // Resets when the candidate is re-anchored (upgrade or ID churn).
+        var stableFrameCount: Int = 1
 
         var trackedIdentifiers: Set<Int> {
             Set(originContacts.keys)
@@ -73,6 +79,10 @@ final class GestureEngine {
                     GestureClassifier.travelDistance(from: startPoint, to: currentPoint)
                 )
             }
+        }
+
+        mutating func incrementStability() {
+            stableFrameCount += 1
         }
 
         func duration(at timestamp: Date) -> TimeInterval {
@@ -92,6 +102,13 @@ final class GestureEngine {
             doubleTapSlot != nil
         }
     }
+
+    // Frames required at the peak finger count before a swipe is committed.
+    // Two frames is the minimum for displacement to exist (one origin + one
+    // current); the third frame buys ~1 OMS frame of tolerance for trailing
+    // landing fingers, preventing a 4-finger swipe from firing as a 3-finger
+    // swipe in the brief window before the 4th finger lands.
+    private static let minimumStableFramesForSwipe: Int = 3
 
     private let source: any GestureSource
     private let classifierFactory: @Sendable () -> GestureClassifier
@@ -180,7 +197,7 @@ final class GestureEngine {
 
                 if frame.isEmpty {
                     if let candidate {
-                        PadiumLogger.gesture.debug("TAP-DIAG: lift with candidate fc=\(candidate.fingerCount) travel=\(candidate.maximumTravel) dur=\(candidate.duration(at: self.scheduler.now))")
+                        PadiumLogger.gesture.debug("TAP-DIAG: lift with candidate fc=\(candidate.peakFingerCount) travel=\(candidate.maximumTravel) dur=\(candidate.duration(at: self.scheduler.now))")
                         self.handleLift(of: candidate, using: localContinuation)
                     }
                     candidate = nil
@@ -210,54 +227,93 @@ final class GestureEngine {
                 }
 
                 let fingerCount = contacts.count
+
                 guard self.hasActiveSlots(for: fingerCount) else {
-                    // Some fingers may have transitioned to leaving/starting while others
-                    // are still active, causing a temporarily lower active count. If the
-                    // TOTAL frame has enough touches, preserve the candidate for tap detection.
-                    if candidate != nil, frame.count >= (candidate?.fingerCount ?? 3) {
-                        PadiumLogger.gesture.debug("TAP-DIAG: active=\(fingerCount) but frame=\(frame.count), keeping candidate")
-                        continue
+                    // No slots configured for the active count. Preserve any
+                    // in-progress candidate so transient 5+ finger noise or a
+                    // lift transition through an unsupported count does not
+                    // tear it down. Travel is updated for fingers we can match.
+                    if var preserved = candidate {
+                        preserved.recordTravel(using: contacts)
+                        candidate = preserved
+                        ScrollSuppressor.shared.isMultitouchActive = preserved.peakFingerCount >= 3
+                    } else {
+                        ScrollSuppressor.shared.isMultitouchActive = false
                     }
-                    PadiumLogger.gesture.debug("TAP-DIAG: no active slots for fc=\(fingerCount)")
-                    candidate = nil
-                    ScrollSuppressor.shared.isMultitouchActive = false
+                    PadiumLogger.gesture.debug("TAP-DIAG: no active slots for fc=\(fingerCount), candidate=\(candidate != nil)")
                     continue
                 }
 
-                ScrollSuppressor.shared.isMultitouchActive = fingerCount >= 3
+                // Reflect the gesture's intent (peak count) when reporting
+                // multitouch activity so scroll suppression keeps holding
+                // through brief lift transitions of 3/4-finger gestures.
+                ScrollSuppressor.shared.isMultitouchActive = max(fingerCount, candidate?.peakFingerCount ?? 0) >= 3
 
                 guard let activeCandidate = candidate else {
                     candidate = GestureCandidate(
                         originContacts: contacts,
-                        fingerCount: fingerCount,
+                        peakFingerCount: fingerCount,
                         startedAt: self.scheduler.now
                     )
                     continue
                 }
 
-                guard activeCandidate.fingerCount == fingerCount,
-                      activeCandidate.trackedIdentifiers == Set(contacts.keys) else {
+                if fingerCount > activeCandidate.peakFingerCount {
+                    // UPGRADE: more fingers than ever seen. Re-anchor at the
+                    // new peak so swipe displacement is measured from when
+                    // the user's intended finger count was actually present.
                     candidate = GestureCandidate(
                         originContacts: contacts,
-                        fingerCount: fingerCount,
+                        peakFingerCount: fingerCount,
                         startedAt: self.scheduler.now
                     )
                     continue
                 }
 
-                if let event = localClassifier.classifyIncremental(
-                    firstContacts: activeCandidate.originContacts,
-                    currentContacts: contacts,
-                    peakFingerCount: fingerCount
-                ), self.activeSlots.contains(event.slot) {
+                if fingerCount < activeCandidate.peakFingerCount {
+                    // Lift in progress: do NOT downgrade. Treating an
+                    // intermediate lower-finger frame as a separate gesture
+                    // is what causes a 4-finger swipe to be misclassified
+                    // as a 2/3-finger tap on lift.
+                    var preserved = activeCandidate
+                    preserved.recordTravel(using: contacts)
+                    candidate = preserved
+                    continue
+                }
+
+                // fingerCount == peakFingerCount.
+                guard activeCandidate.trackedIdentifiers == Set(contacts.keys) else {
+                    // ID churn at the peak — re-anchor with the new identifiers.
+                    candidate = GestureCandidate(
+                        originContacts: contacts,
+                        peakFingerCount: fingerCount,
+                        startedAt: self.scheduler.now
+                    )
+                    continue
+                }
+
+                var updatedCandidate = activeCandidate
+                updatedCandidate.incrementStability()
+                updatedCandidate.recordTravel(using: contacts)
+
+                // Defer swipe classification until the candidate has stayed
+                // at the peak for a minimum number of consecutive frames.
+                // Without this gate, a fast 4-finger swipe can fire as a
+                // 3-finger swipe in the brief window before the 4th finger
+                // lands.
+                if updatedCandidate.stableFrameCount >= Self.minimumStableFramesForSwipe,
+                   let event = localClassifier.classifyIncremental(
+                       firstContacts: updatedCandidate.originContacts,
+                       currentContacts: contacts,
+                       peakFingerCount: updatedCandidate.peakFingerCount
+                   ),
+                   self.activeSlots.contains(event.slot) {
                     localContinuation.yield(event)
                     waitingForLift = true
                     candidate = nil
                     continue
                 }
 
-                var updatedCandidate = activeCandidate
-                updatedCandidate.recordTravel(using: contacts)
                 candidate = updatedCandidate
             }
         }
@@ -301,10 +357,10 @@ final class GestureEngine {
             PadiumLogger.gesture.debug("TAP-DIAG: REJECTED travel=\(travel) > max=\(maximumTravel)")
             return
         }
-        PadiumLogger.gesture.debug("TAP-DIAG: ACCEPTED tap fc=\(candidate.fingerCount) dur=\(duration) travel=\(travel)")
+        PadiumLogger.gesture.debug("TAP-DIAG: ACCEPTED tap fc=\(candidate.peakFingerCount) dur=\(duration) travel=\(travel)")
 
         handleRecognizedTap(
-            fingerCount: candidate.fingerCount,
+            fingerCount: candidate.peakFingerCount,
             recognizedAt: recognitionTime,
             using: continuation
         )
