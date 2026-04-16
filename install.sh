@@ -64,7 +64,10 @@ ensure_install_dir_writable() {
 
 	cat >&2 <<EOF
 $INSTALL_DIR is not writable by the current user.
-Re-run with: sudo bash install.sh
+If you ran this via curl | bash, re-run with:
+  curl -fsSL https://raw.githubusercontent.com/dtateks/padium/main/install.sh | sudo bash
+If you saved install.sh locally, re-run with:
+  sudo bash install.sh
 EOF
 	exit 1
 }
