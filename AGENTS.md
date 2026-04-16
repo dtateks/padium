@@ -20,6 +20,7 @@ Bundle ID: `com.padium`, version 0.1.0. LSUIElement=true (no Dock icon).
   ```
   scripts/run-dev.sh
   ```
+- `scripts/install-hooks.sh` enables the local pre-push release fast lane by setting `git config --local core.hooksPath .githooks`, so Git runs the version-controlled hook directly from `.githooks/pre-push`
 - Builds unsigned, replaces `/Applications/Padium.app` by default (or `$PADIUM_INSTALL_DIR`) by moving the built app into place, signs once with a stable Apple Development/Mac Development identity, then opens the installed copy.
 - Stable install path + stable signing identity avoids repeated Accessibility re-grants from changing signatures.
 - Launch without Accessibility permission immediately prompts, then terminates; relaunch after granting permission.
