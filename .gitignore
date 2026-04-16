@@ -26,6 +26,8 @@ Package.resolved
 *.profraw
 *.profdata
 
+# Release artifacts (produced by scripts/build-release.sh and CI)
+/Padium-macos.zip
 
 # Environment
 .env
