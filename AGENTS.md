@@ -64,8 +64,8 @@ Physical click path: `ScrollSuppressor` CGEventTap detects configured 3/4-finger
 - XCTest launch path bypasses that prompt+quit behavior so host-app tests can execute.
 - `GestureEngine` commits only when finger count and touch identifiers remain stable; after emission it suppresses duplicates until a lift frame
 - `GestureClassifier` requires stable touch identifiers, dominant-axis commitment, and per-finger direction agreement; vertical swipes tolerate lateral drift while the dominant axis stays vertical
-- `GestureEngine` is touch-only: it emits swipes plus touch tap/double-tap slots (1/2-finger double-tap and dedicated 3/4-finger tap/double-tap slots) and never emits physical click/double-click slots
-- Legacy 3/4 click slots keep their historical raw values (`threeFingerTap`, `threeFingerDoubleTap`, `fourFingerTap`, `fourFingerDoubleTap`) for persisted shortcut/action-kind compatibility; dedicated 3/4 touch tap slots use new raw values
+- `GestureEngine` is touch-only: it emits swipes plus double-tap slots (1/2-finger double-tap and 3/4-finger double-tap) and never emits physical click/double-click slots; there are no single touch-tap slots — only double-tap
+- Legacy 3/4 click slots keep their historical raw values (`threeFingerTap`, `threeFingerDoubleTap`, `fourFingerTap`, `fourFingerDoubleTap`) for persisted shortcut/action-kind compatibility; 3/4-finger touch double-tap slots use distinct raw values (`threeFingerTouchDoubleTap`, `fourFingerTouchDoubleTap`)
 - Shared sensitivity changes apply immediately without restarting the runtime for swipes and touch taps; `GestureClassifier` reads the current swipe threshold live and tap travel tolerance uses the same boosted sensitivity curve. UI sensitivity applies a +20 point base boost before threshold mapping, so default 50% behaves like the previous 70% calibration
 - `AppState` refreshes live runtime/config state from `UserDefaults` changes; shortcut-binding changes must refresh conflict state and gesture routing together
 - `ShortcutRegistry.name(for:)` is the SINGLE source of truth for slot→`KeyboardShortcuts.Name` mapping — no ad-hoc Name creation elsewhere

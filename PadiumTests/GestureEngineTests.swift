@@ -428,31 +428,6 @@ struct GestureEngineTests {
         #expect(received.map(\.slot) == [.threeFingerSwipeRight, .threeFingerSwipeRight])
     }
 
-    @Test func tapEmitsImmediatelyWhenDoubleTapSlotIsInactive() async {
-        let source = StubGestureSource()
-        let scheduler = ManualGestureScheduler()
-        let engine = makeEngine(
-            source: source,
-            supportedSlots: [.threeFingerTap],
-            scheduler: scheduler
-        )
-        engine.start()
-
-        let collector = EventCollector()
-        let collectionTask = collector.collect(from: engine.events)
-
-        await performTap(
-            source: source,
-            scheduler: scheduler,
-            frames: makeTapFrames(fingerCount: 3)
-        )
-
-        #expect(collector.events.map(\.slot) == [.threeFingerTap])
-
-        engine.stop()
-        await collectionTask.value
-    }
-
     @Test func oneFingerSecondTapInsideWindowEmitsDoubleTapWithoutSingleTap() async {
         let source = StubGestureSource()
         let scheduler = ManualGestureScheduler()
@@ -590,45 +565,12 @@ struct GestureEngineTests {
         await collectionTask.value
     }
 
-    @Test func tapWaitsForDoubleTapWindowBeforeEmittingSingleTap() async {
-        let source = StubGestureSource()
-        let scheduler = ManualGestureScheduler()
-        let engine = makeEngine(
-            source: source,
-            supportedSlots: [.threeFingerTap, .threeFingerDoubleTap],
-            scheduler: scheduler
-        )
-        engine.start()
-
-        let collector = EventCollector()
-        let collectionTask = collector.collect(from: engine.events)
-
-        await performTap(
-            source: source,
-            scheduler: scheduler,
-            frames: makeTapFrames(fingerCount: 3)
-        )
-
-        #expect(collector.events.isEmpty)
-
-        scheduler.advance(by: GestureTapSettings.doubleTapWindow - 0.01)
-        await flushPipeline()
-        #expect(collector.events.isEmpty)
-
-        scheduler.advance(by: 0.02)
-        await flushPipeline()
-        #expect(collector.events.map(\.slot) == [.threeFingerTap])
-
-        engine.stop()
-        await collectionTask.value
-    }
-
     @Test func secondTapInsideWindowEmitsDoubleTapWithoutSingleTap() async {
         let source = StubGestureSource()
         let scheduler = ManualGestureScheduler()
         let engine = makeEngine(
             source: source,
-            supportedSlots: [.threeFingerTap, .threeFingerDoubleTap],
+            supportedSlots: [.threeFingerDoubleTap],
             scheduler: scheduler
         )
         engine.start()
@@ -660,66 +602,12 @@ struct GestureEngineTests {
         await collectionTask.value
     }
 
-    @Test func fourFingerTapEmitsImmediatelyWhenDoubleTapSlotIsInactive() async {
-        let source = StubGestureSource()
-        let scheduler = ManualGestureScheduler()
-        let engine = makeEngine(
-            source: source,
-            supportedSlots: [.fourFingerTap],
-            scheduler: scheduler
-        )
-        engine.start()
-
-        let collector = EventCollector()
-        let collectionTask = collector.collect(from: engine.events)
-
-        await performTap(
-            source: source,
-            scheduler: scheduler,
-            frames: makeTapFrames(fingerCount: 4)
-        )
-
-        #expect(collector.events.map(\.slot) == [.fourFingerTap])
-
-        engine.stop()
-        await collectionTask.value
-    }
-
-    @Test func fourFingerTapWaitsForDoubleTapWindowBeforeEmittingSingleTap() async {
-        let source = StubGestureSource()
-        let scheduler = ManualGestureScheduler()
-        let engine = makeEngine(
-            source: source,
-            supportedSlots: [.fourFingerTap, .fourFingerDoubleTap],
-            scheduler: scheduler
-        )
-        engine.start()
-
-        let collector = EventCollector()
-        let collectionTask = collector.collect(from: engine.events)
-
-        await performTap(
-            source: source,
-            scheduler: scheduler,
-            frames: makeTapFrames(fingerCount: 4)
-        )
-
-        #expect(collector.events.isEmpty)
-
-        scheduler.advance(by: GestureTapSettings.doubleTapWindow + 0.01)
-        await flushPipeline()
-        #expect(collector.events.map(\.slot) == [.fourFingerTap])
-
-        engine.stop()
-        await collectionTask.value
-    }
-
     @Test func fourFingerSecondTapInsideWindowEmitsDoubleTapWithoutSingleTap() async {
         let source = StubGestureSource()
         let scheduler = ManualGestureScheduler()
         let engine = makeEngine(
             source: source,
-            supportedSlots: [.fourFingerTap, .fourFingerDoubleTap],
+            supportedSlots: [.fourFingerDoubleTap],
             scheduler: scheduler
         )
         engine.start()
@@ -813,12 +701,12 @@ struct GestureEngineTests {
         await collectionTask.value
     }
 
-    @Test func tapDoesNotEmitWhenTravelExceedsThreshold() async {
+    @Test func doubleTapDoesNotEmitWhenTravelExceedsThreshold() async {
         let source = StubGestureSource()
         let scheduler = ManualGestureScheduler()
         let engine = makeEngine(
             source: source,
-            supportedSlots: [.threeFingerTap],
+            supportedSlots: [.threeFingerDoubleTap],
             scheduler: scheduler
         )
         engine.start()
@@ -826,6 +714,13 @@ struct GestureEngineTests {
         let collector = EventCollector()
         let collectionTask = collector.collect(from: engine.events)
 
+        // Both taps have excessive travel — neither registers as a tap candidate.
+        await performTap(
+            source: source,
+            scheduler: scheduler,
+            frames: makeTapFrames(fingerCount: 3, endX: 0.60, endY: 0.50)
+        )
+        scheduler.advance(by: 0.10)
         await performTap(
             source: source,
             scheduler: scheduler,
@@ -850,7 +745,7 @@ struct GestureEngineTests {
             let scheduler = ManualGestureScheduler()
             let engine = makeEngine(
                 source: source,
-                supportedSlots: [.threeFingerTap],
+                supportedSlots: [.threeFingerDoubleTap],
                 scheduler: scheduler
             )
             engine.start()
@@ -858,6 +753,13 @@ struct GestureEngineTests {
             let collector = EventCollector()
             let collectionTask = collector.collect(from: engine.events)
 
+            // Two taps with moderate travel — at low sensitivity, travel is rejected.
+            await performTap(
+                source: source,
+                scheduler: scheduler,
+                frames: makeTapFrames(fingerCount: 3, endX: 0.543, endY: 0.50)
+            )
+            scheduler.advance(by: 0.10)
             await performTap(
                 source: source,
                 scheduler: scheduler,
@@ -878,7 +780,7 @@ struct GestureEngineTests {
             let scheduler = ManualGestureScheduler()
             let engine = makeEngine(
                 source: source,
-                supportedSlots: [.threeFingerTap],
+                supportedSlots: [.threeFingerDoubleTap],
                 scheduler: scheduler
             )
             engine.start()
@@ -886,25 +788,32 @@ struct GestureEngineTests {
             let collector = EventCollector()
             let collectionTask = collector.collect(from: engine.events)
 
+            // At high sensitivity, moderate travel is accepted — double tap emits.
+            await performTap(
+                source: source,
+                scheduler: scheduler,
+                frames: makeTapFrames(fingerCount: 3, endX: 0.543, endY: 0.50)
+            )
+            scheduler.advance(by: 0.10)
             await performTap(
                 source: source,
                 scheduler: scheduler,
                 frames: makeTapFrames(fingerCount: 3, endX: 0.543, endY: 0.50)
             )
 
-            #expect(collector.events.map(\.slot) == [.threeFingerTap])
+            #expect(collector.events.map(\.slot) == [.threeFingerDoubleTap])
 
             engine.stop()
             await collectionTask.value
         }
     }
 
-    @Test func stopCancelsPendingSingleTapEmission() async {
+    @Test func stopCancelsPendingDoubleTapDetection() async {
         let source = StubGestureSource()
         let scheduler = ManualGestureScheduler()
         let engine = makeEngine(
             source: source,
-            supportedSlots: [.threeFingerTap, .threeFingerDoubleTap],
+            supportedSlots: [.threeFingerDoubleTap],
             scheduler: scheduler
         )
         engine.start()

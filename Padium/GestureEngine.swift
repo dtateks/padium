@@ -86,11 +86,10 @@ final class GestureEngine {
     }
 
     private struct TapActivation {
-        let singleTapSlot: GestureSlot?
         let doubleTapSlot: GestureSlot?
 
         var hasAnyTapSlot: Bool {
-            singleTapSlot != nil || doubleTapSlot != nil
+            doubleTapSlot != nil
         }
     }
 
@@ -282,7 +281,6 @@ final class GestureEngine {
     private func tapActivation(for fingerCount: Int) -> TapActivation {
         let relevantSlots = activeSlots.filter { $0.fingerCount == fingerCount }
         return TapActivation(
-            singleTapSlot: relevantSlots.first(where: { $0.kind == .tap }),
             doubleTapSlot: relevantSlots.first(where: { $0.kind == .doubleTap })
         )
     }
@@ -320,8 +318,6 @@ final class GestureEngine {
         let activation = tapActivation(for: fingerCount)
         guard activation.hasAnyTapSlot else { return }
 
-        resolvePendingTapIfNeeded(for: fingerCount, recognizedAt: recognizedAt, using: continuation)
-
         if let pendingTap = pendingTaps[fingerCount],
            recognizedAt.timeIntervalSince(pendingTap.recognizedAt) <= GestureTapSettings.doubleTapWindow,
            let doubleTapSlot = activation.doubleTapSlot {
@@ -334,55 +330,17 @@ final class GestureEngine {
         if let pendingTap = pendingTaps[fingerCount] {
             pendingTap.scheduledWork.cancel()
             pendingTaps.removeValue(forKey: fingerCount)
-
-            if let singleTapSlot = activation.singleTapSlot {
-                emit(singleTapSlot, at: recognizedAt, using: continuation)
-            }
         }
 
-        guard activation.doubleTapSlot != nil else {
-            if let singleTapSlot = activation.singleTapSlot {
-                emit(singleTapSlot, at: recognizedAt, using: continuation)
-            }
-            return
-        }
-
-        let scheduledWork = scheduler.schedule(after: GestureTapSettings.doubleTapWindow) { [weak self, continuation] in
-            self?.finalizePendingTap(for: fingerCount, using: continuation)
+        let scheduledWork = scheduler.schedule(after: GestureTapSettings.doubleTapWindow) { [weak self] in
+            self?.cleanUpExpiredPendingTap(for: fingerCount)
         }
         pendingTaps[fingerCount] = PendingTap(recognizedAt: recognizedAt, scheduledWork: scheduledWork)
     }
 
-    private func resolvePendingTapIfNeeded(
-        for fingerCount: Int,
-        recognizedAt: Date,
-        using continuation: AsyncStream<GestureEvent>.Continuation
-    ) {
-        guard let pendingTap = pendingTaps[fingerCount] else { return }
-        guard recognizedAt.timeIntervalSince(pendingTap.recognizedAt) > GestureTapSettings.doubleTapWindow else {
-            return
-        }
-
-        pendingTap.scheduledWork.cancel()
-        pendingTaps.removeValue(forKey: fingerCount)
-
-        let activation = tapActivation(for: fingerCount)
-        if let singleTapSlot = activation.singleTapSlot {
-            emit(singleTapSlot, at: recognizedAt, using: continuation)
-        }
-    }
-
-    private func finalizePendingTap(
-        for fingerCount: Int,
-        using continuation: AsyncStream<GestureEvent>.Continuation
-    ) {
+    private func cleanUpExpiredPendingTap(for fingerCount: Int) {
         guard let pendingTap = pendingTaps.removeValue(forKey: fingerCount) else { return }
         pendingTap.scheduledWork.cancel()
-
-        let activation = tapActivation(for: fingerCount)
-        if let singleTapSlot = activation.singleTapSlot {
-            emit(singleTapSlot, at: scheduler.now, using: continuation)
-        }
     }
 
     private func cancelPendingTaps() {

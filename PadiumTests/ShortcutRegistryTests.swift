@@ -41,10 +41,8 @@ struct ShortcutRegistryTests {
         #expect(GestureSlot.fourFingerDoubleClick.displayName == "Double Click")
     }
 
-    @Test func higherFingerTouchTapLabelsStayTapBased() {
-        #expect(GestureSlot.threeFingerTap.displayName == "Tap")
+    @Test func higherFingerTouchDoubleTapLabelsStayTapBased() {
         #expect(GestureSlot.threeFingerDoubleTap.displayName == "Double Tap")
-        #expect(GestureSlot.fourFingerTap.displayName == "Tap")
         #expect(GestureSlot.fourFingerDoubleTap.displayName == "Double Tap")
     }
 
@@ -55,10 +53,8 @@ struct ShortcutRegistryTests {
         #expect(GestureSlot.fourFingerDoubleClick.rawValue == "fourFingerDoubleTap")
     }
 
-    @Test func newTouchTapRawValuesAreDistinctFromLegacyClickKeys() {
-        #expect(GestureSlot.threeFingerTap.rawValue == "threeFingerTouchTap")
+    @Test func touchDoubleTapRawValuesAreDistinctFromLegacyClickKeys() {
         #expect(GestureSlot.threeFingerDoubleTap.rawValue == "threeFingerTouchDoubleTap")
-        #expect(GestureSlot.fourFingerTap.rawValue == "fourFingerTouchTap")
         #expect(GestureSlot.fourFingerDoubleTap.rawValue == "fourFingerTouchDoubleTap")
     }
 

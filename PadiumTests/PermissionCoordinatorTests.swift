@@ -383,11 +383,11 @@ struct AppStateTests {
         )
         #expect(runtime.activeSlotsHistory.last == [])
 
-        let name = ShortcutRegistry.name(for: .threeFingerTap)
+        let name = ShortcutRegistry.name(for: .threeFingerDoubleTap)
         KeyboardShortcuts.setShortcut(.init(.f13, modifiers: []), for: name)
         state.handleShortcutConfigurationChange()
 
-        #expect(runtime.activeSlotsHistory.last == [.threeFingerTap])
+        #expect(runtime.activeSlotsHistory.last == [.threeFingerDoubleTap])
         _ = preservedConfig
     }
 
@@ -400,12 +400,12 @@ struct AppStateTests {
         )
         #expect(runtime.activeSlotsHistory.last == [])
 
-        let name = ShortcutRegistry.name(for: .threeFingerTap)
+        let name = ShortcutRegistry.name(for: .threeFingerDoubleTap)
         KeyboardShortcuts.setShortcut(.init(.f13, modifiers: []), for: name)
         NotificationCenter.default.post(name: UserDefaults.didChangeNotification, object: UserDefaults.standard)
         await pumpEventLoop()
 
-        #expect(runtime.activeSlotsHistory.last == [.threeFingerTap])
+        #expect(runtime.activeSlotsHistory.last == [.threeFingerDoubleTap])
         _ = state
         _ = preservedConfig
     }
@@ -459,7 +459,7 @@ struct AppStateTests {
         defer { clearAllShortcutBindings() }
 
         KeyboardShortcuts.setShortcut(.init(.f13, modifiers: []), for: ShortcutRegistry.name(for: .threeFingerClick))
-        KeyboardShortcuts.setShortcut(.init(.f14, modifiers: []), for: ShortcutRegistry.name(for: .threeFingerTap))
+        KeyboardShortcuts.setShortcut(.init(.f14, modifiers: []), for: ShortcutRegistry.name(for: .threeFingerDoubleTap))
 
         let state = makeState(checker: checker, runtime: runtime, emitter: emitter)
         state.refreshPermissions()
@@ -486,7 +486,7 @@ struct AppStateTests {
         await pumpEventLoop()
         #expect(emitter.emittedSlots == [.threeFingerClick])
 
-        runtime.yield(.threeFingerTap)
+        runtime.yield(.threeFingerDoubleTap)
         await pumpEventLoop()
         #expect(emitter.emittedSlots == [.threeFingerClick])
 
@@ -502,7 +502,7 @@ struct AppStateTests {
         clearAllShortcutBindings()
         defer { clearAllShortcutBindings() }
 
-        KeyboardShortcuts.setShortcut(.init(.f14, modifiers: []), for: ShortcutRegistry.name(for: .threeFingerTap))
+        KeyboardShortcuts.setShortcut(.init(.f14, modifiers: []), for: ShortcutRegistry.name(for: .threeFingerDoubleTap))
 
         let state = makeState(checker: checker, runtime: runtime, emitter: emitter)
         state.refreshPermissions()
@@ -534,10 +534,10 @@ struct AppStateTests {
             Issue.record("Expected unconfigured physical click up to pass through")
         }
 
-        runtime.yield(.threeFingerTap)
+        runtime.yield(.threeFingerDoubleTap)
         await pumpEventLoop()
 
-        #expect(emitter.emittedSlots == [.threeFingerTap])
+        #expect(emitter.emittedSlots == [.threeFingerDoubleTap])
 
         _ = state
         _ = preservedConfig
