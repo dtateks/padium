@@ -67,6 +67,11 @@ extension SystemGestureManager: SystemGestureManaging {}
 
 @MainActor @Observable
 final class AppState {
+    private struct StoredConfiguration: Equatable {
+        let configuredSlots: Set<GestureSlot>
+        let gestureSensitivity: Double
+    }
+
     var permissionState: PermissionState { coordinator.permissionState }
     var isRunning: Bool { runtimeTask != nil }
     var systemGestureNotice: String?
@@ -82,6 +87,8 @@ final class AppState {
     private let shortcutEmitter: any ShortcutEmitting
     private let middleClickEmitter: any MiddleClickEmitting
     private var runtimeTask: Task<Void, Never>?
+    private var observedConfiguration: StoredConfiguration
+    private var defaultsObserver: NSObjectProtocol?
 
     init(
         permissionChecker: PermissionChecking = SystemPermissionChecker(),
@@ -97,11 +104,18 @@ final class AppState {
         self.preemptionController = controller
         let policy = controller.currentPolicy(activeSlots: Set(GestureSlot.allCases))
         let supportedGestureSlots = Self.resolveSupportedGestureSlots(from: policy)
+        let initialGestureSensitivity = GestureSensitivitySetting.storedValue()
+        let initialConfiguredSlots = Self.configuredGestureSlots(from: supportedGestureSlots)
         self.supportedGestureSlots = supportedGestureSlots
-        self.gestureSensitivity = GestureSensitivitySetting.storedValue()
+        self.gestureSensitivity = initialGestureSensitivity
         self.systemGestureManager = systemGestureManager ?? SystemGestureManager.shared
         self.systemGestureNotice = nil
         self.conflictingSlots = []
+        self.observedConfiguration = StoredConfiguration(
+            configuredSlots: initialConfiguredSlots,
+            gestureSensitivity: initialGestureSensitivity
+        )
+        self.defaultsObserver = nil
 
         if let gestureEngine {
             self.gestureEngine = gestureEngine
@@ -113,6 +127,15 @@ final class AppState {
         self.middleClickEmitter = middleClickEmitter ?? MiddleClickEmitter()
         self.gestureEngine.updateActiveSlots(configuredGestureSlots())
         refreshSystemGestureConflicts()
+        defaultsObserver = NotificationCenter.default.addObserver(
+            forName: UserDefaults.didChangeNotification,
+            object: nil,
+            queue: nil
+        ) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                self?.refreshStoredConfigurationIfNeeded()
+            }
+        }
     }
 
     /// Check permissions and auto-start runtime if granted. Also refreshes system gesture conflicts.
@@ -179,8 +202,9 @@ final class AppState {
     func setGestureSensitivity(_ value: Double) {
         let clamped = GestureSensitivitySetting.clamp(value)
         guard gestureSensitivity != clamped else { return }
-        gestureSensitivity = clamped
         GestureSensitivitySetting.store(clamped)
+        UserDefaults.standard.synchronize()
+        refreshStoredConfigurationIfNeeded()
     }
 
     private func startRuntimeIfNeeded() {
@@ -227,16 +251,7 @@ final class AppState {
         // Flush shortcut/action-kind changes to disk immediately so they survive
         // unexpected termination or rebuild-kill sequences.
         UserDefaults.standard.synchronize()
-
-        gestureEngine.updateActiveSlots(configuredGestureSlots())
-        if isRunning {
-            applySystemGestureSuppression()
-        } else if coordinator.isFullyGranted {
-            // Runtime may have failed to start on first launch (e.g., OMS not yet available).
-            // Retry now that the user changed config.
-            startRuntimeIfNeeded()
-        }
-        refreshSystemGestureConflicts()
+        refreshStoredConfigurationIfNeeded()
     }
 
     private func applySystemGestureSuppression() {
@@ -253,7 +268,38 @@ final class AppState {
     }
 
     private func configuredGestureSlots() -> Set<GestureSlot> {
-        Set(supportedGestureSlots.filter(\.isConfigured))
+        Self.configuredGestureSlots(from: supportedGestureSlots)
+    }
+
+    private func refreshStoredConfigurationIfNeeded() {
+        let currentConfiguration = currentStoredConfiguration()
+        let previousConfiguration = observedConfiguration
+        guard currentConfiguration != previousConfiguration else { return }
+
+        observedConfiguration = currentConfiguration
+
+        if currentConfiguration.gestureSensitivity != gestureSensitivity {
+            gestureSensitivity = currentConfiguration.gestureSensitivity
+        }
+
+        guard currentConfiguration.configuredSlots != previousConfiguration.configuredSlots else {
+            return
+        }
+
+        gestureEngine.updateActiveSlots(currentConfiguration.configuredSlots)
+        if isRunning {
+            applySystemGestureSuppression()
+        } else if coordinator.isFullyGranted {
+            startRuntimeIfNeeded()
+        }
+        refreshSystemGestureConflicts()
+    }
+
+    private func currentStoredConfiguration() -> StoredConfiguration {
+        StoredConfiguration(
+            configuredSlots: configuredGestureSlots(),
+            gestureSensitivity: GestureSensitivitySetting.storedValue()
+        )
     }
 
     private func shouldEmitMiddleClick(for event: GestureEvent) -> Bool {
@@ -275,5 +321,9 @@ private extension AppState {
             PadiumLogger.gesture.warning("Ignoring unsupported policy gestures: \(unsupportedList, privacy: .public)")
         }
         return supportedSlots
+    }
+
+    static func configuredGestureSlots(from supportedSlots: [GestureSlot]) -> Set<GestureSlot> {
+        Set(supportedSlots.filter(\.isConfigured))
     }
 }

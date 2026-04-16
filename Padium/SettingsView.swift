@@ -61,14 +61,14 @@ struct SettingsView: View {
                     in: GestureSensitivitySetting.minimumValue...GestureSensitivitySetting.maximumValue
                 )
 
-                Text("Higher sensitivity triggers swipe gestures with shorter movement. Click and double-click gestures use fixed timing and movement thresholds.")
+                Text("Higher sensitivity triggers swipe gestures with shorter movement. Tap gestures use fixed timing and movement thresholds.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
 
             if showsExperimentalTapNotice {
                 Section {
-                    Label("Experimental click gestures can overlap with macOS Look Up, Mission Control, App Exposé, or Show Desktop depending on your trackpad settings.", systemImage: "flask")
+                    Label("Experimental tap gestures can overlap with macOS Smart Zoom, Look Up, Mission Control, App Exposé, or Show Desktop depending on your trackpad settings.", systemImage: "flask")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }

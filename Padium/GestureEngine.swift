@@ -51,8 +51,8 @@ final class TaskScheduledWork: GestureScheduledWork {
 }
 
 // Drives the gesture pipeline from raw touch frames to emitted gesture events.
-// Tracks stable 3/4-finger contact sequences, emits swipes immediately, and
-// arbitrates taps versus double taps when the fingers lift.
+// Tracks stable contact sequences for configured finger counts, emits 3/4-finger
+// swipes immediately, and arbitrates taps versus double taps when the fingers lift.
 @MainActor
 final class GestureEngine {
     private struct GestureCandidate {
@@ -200,7 +200,7 @@ final class GestureEngine {
                     PadiumLogger.gesture.debug("TAP-DIAG: frame touches=\(frame.count) states=[\(states, privacy: .public)]")
                 }
 
-                guard let contacts = localClassifier.stableActiveContacts(in: frame) else {
+                guard let contacts = localClassifier.stableActiveContacts(in: frame, expectedFingerCount: frame.count) else {
                     // Touches are present but not in a classifiable state (e.g., starting
                     // or leaving transitions). Keep the candidate alive so tap recognition
                     // can complete on the subsequent empty frame.
@@ -211,7 +211,7 @@ final class GestureEngine {
                 }
 
                 let fingerCount = contacts.count
-                guard fingerCount == 3 || fingerCount == 4 else {
+                guard self.hasActiveSlots(for: fingerCount) else {
                     // Some fingers may have transitioned to leaving/starting while others
                     // are still active, causing a temporarily lower active count. If the
                     // TOTAL frame has enough touches, preserve the candidate for tap detection.
@@ -219,19 +219,13 @@ final class GestureEngine {
                         PadiumLogger.gesture.debug("TAP-DIAG: active=\(fingerCount) but frame=\(frame.count), keeping candidate")
                         continue
                     }
-                    candidate = nil
-                    ScrollSuppressor.shared.isMultitouchActive = false
-                    continue
-                }
-
-                guard self.hasActiveSlots(for: fingerCount) else {
                     PadiumLogger.gesture.debug("TAP-DIAG: no active slots for fc=\(fingerCount)")
                     candidate = nil
                     ScrollSuppressor.shared.isMultitouchActive = false
                     continue
                 }
 
-                ScrollSuppressor.shared.isMultitouchActive = true
+                ScrollSuppressor.shared.isMultitouchActive = fingerCount >= 3
 
                 guard let activeCandidate = candidate else {
                     candidate = GestureCandidate(

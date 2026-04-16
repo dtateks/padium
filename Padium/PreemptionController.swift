@@ -34,6 +34,12 @@ final class PreemptionController {
     func currentSystemGestureSettings() -> [SystemGestureSetting] {
         [
             SystemGestureSetting(
+                key: "TrackpadTwoFingerDoubleTapGesture",
+                title: "Smart Zoom (2-finger double-tap)",
+                isEnabled: isSystemGestureEnabled(forKey: "TrackpadTwoFingerDoubleTapGesture"),
+                conflictingSlots: [.twoFingerDoubleTap]
+            ),
+            SystemGestureSetting(
                 key: "TrackpadThreeFingerHorizSwipeGesture",
                 title: "Swipe between full-screen apps (3 fingers)",
                 isEnabled: isSystemGestureEnabled(forKey: "TrackpadThreeFingerHorizSwipeGesture"),

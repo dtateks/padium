@@ -18,6 +18,7 @@ final class SystemGestureManager {
     private let backupKey = "padium.systemGestureBackup"
 
     private static let trackpadKeys = [
+        "TrackpadTwoFingerDoubleTapGesture",
         "TrackpadThreeFingerHorizSwipeGesture",
         "TrackpadThreeFingerVertSwipeGesture",
         "TrackpadFourFingerHorizSwipeGesture",

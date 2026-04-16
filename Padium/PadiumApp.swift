@@ -65,6 +65,13 @@ struct PadiumApp: App {
             SettingsContentView(appState: appState)
         }
         .defaultSize(width: 400, height: 500)
+        .commands {
+            // Remove the standard Edit menu so its key equivalents (⌘C, ⌘V, etc.)
+            // don't block KeyboardShortcuts.Recorder from accepting those shortcuts.
+            CommandGroup(replacing: .textEditing) {}
+            CommandGroup(replacing: .undoRedo) {}
+            CommandGroup(replacing: .pasteboard) {}
+        }
     }
 }
 

@@ -2,6 +2,8 @@ import Foundation
 import KeyboardShortcuts
 
 enum GestureSlot: String, CaseIterable, Sendable {
+    case oneFingerDoubleTap
+    case twoFingerDoubleTap
     case threeFingerSwipeLeft
     case threeFingerSwipeRight
     case threeFingerSwipeUp
@@ -23,6 +25,9 @@ enum GestureSlot: String, CaseIterable, Sendable {
 
     var kind: Kind {
         switch self {
+        case .oneFingerDoubleTap, .twoFingerDoubleTap,
+             .threeFingerDoubleTap, .fourFingerDoubleTap:
+            .doubleTap
         case .threeFingerSwipeLeft, .threeFingerSwipeRight,
              .threeFingerSwipeUp, .threeFingerSwipeDown,
              .fourFingerSwipeLeft, .fourFingerSwipeRight,
@@ -30,13 +35,15 @@ enum GestureSlot: String, CaseIterable, Sendable {
             .swipe
         case .threeFingerTap, .fourFingerTap:
             .tap
-        case .threeFingerDoubleTap, .fourFingerDoubleTap:
-            .doubleTap
         }
     }
 
     var fingerCount: Int {
         switch self {
+        case .oneFingerDoubleTap:
+            1
+        case .twoFingerDoubleTap:
+            2
         case .threeFingerSwipeLeft, .threeFingerSwipeRight,
              .threeFingerSwipeUp, .threeFingerSwipeDown,
              .threeFingerTap, .threeFingerDoubleTap:
@@ -54,6 +61,8 @@ enum GestureSlot: String, CaseIterable, Sendable {
 
     var tapSlot: GestureSlot? {
         switch self {
+        case .oneFingerDoubleTap, .twoFingerDoubleTap:
+            nil
         case .threeFingerTap, .threeFingerDoubleTap:
             .threeFingerTap
         case .fourFingerTap, .fourFingerDoubleTap:
@@ -65,6 +74,10 @@ enum GestureSlot: String, CaseIterable, Sendable {
 
     var doubleTapSlot: GestureSlot? {
         switch self {
+        case .oneFingerDoubleTap:
+            .oneFingerDoubleTap
+        case .twoFingerDoubleTap:
+            .twoFingerDoubleTap
         case .threeFingerTap, .threeFingerDoubleTap:
             .threeFingerDoubleTap
         case .fourFingerTap, .fourFingerDoubleTap:
@@ -76,23 +89,29 @@ enum GestureSlot: String, CaseIterable, Sendable {
 
     var displayName: String {
         switch self {
+        case .oneFingerDoubleTap:    "Double Tap"
+        case .twoFingerDoubleTap:    "Double Tap"
         case .threeFingerSwipeLeft:  "Swipe Left"
         case .threeFingerSwipeRight: "Swipe Right"
         case .threeFingerSwipeUp:    "Swipe Up"
         case .threeFingerSwipeDown:  "Swipe Down"
-        case .threeFingerTap:        "Click"
-        case .threeFingerDoubleTap:  "Double Click"
+        case .threeFingerTap:        "Tap"
+        case .threeFingerDoubleTap:  "Double Tap"
         case .fourFingerSwipeLeft:   "Swipe Left"
         case .fourFingerSwipeRight:  "Swipe Right"
         case .fourFingerSwipeUp:     "Swipe Up"
         case .fourFingerSwipeDown:   "Swipe Down"
-        case .fourFingerTap:         "Click"
-        case .fourFingerDoubleTap:   "Double Click"
+        case .fourFingerTap:         "Tap"
+        case .fourFingerDoubleTap:   "Double Tap"
         }
     }
 
     var sectionTitle: String {
         switch self {
+        case .oneFingerDoubleTap:
+            "1 Finger"
+        case .twoFingerDoubleTap:
+            "2 Finger"
         case .threeFingerSwipeLeft, .threeFingerSwipeRight,
              .threeFingerSwipeUp,   .threeFingerSwipeDown,
              .threeFingerTap,       .threeFingerDoubleTap:
