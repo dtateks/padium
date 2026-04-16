@@ -1,0 +1,70 @@
+name: Release macOS bundle
+
+on:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: write
+
+jobs:
+  prepare-release:
+    runs-on: ubuntu-latest
+    outputs:
+      release_tag: ${{ steps.plan.outputs.release_tag }}
+      build_matrix: ${{ steps.plan.outputs.build_matrix }}
+    steps:
+      - name: Plan release tag and build matrix
+        id: plan
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          short_sha="${GITHUB_SHA::7}"
+          local_tag="local-${short_sha}"
+          local_asset="Padium-darwin-arm64.zip"
+          reuse_local="false"
+
+          if gh release view "$local_tag" >/dev/null 2>&1; then
+            for attempt in $(seq 1 12); do
+              if gh release view "$local_tag" --json assets -q '.assets[].name' 2>/dev/null | grep -qx "$local_asset"; then
+                reuse_local="true"
+                break
+              fi
+              sleep 5
+            done
+          fi
+
+          if [[ "$reuse_local" == "true" ]]; then
+            echo "release_tag=$local_tag" >> "$GITHUB_OUTPUT"
+            echo 'build_matrix={"include":[{"arch":"x64","runner":"macos-13","asset_name":"Padium-darwin-x64.zip"}]}' >> "$GITHUB_OUTPUT"
+          else
+            echo "release_tag=main-${GITHUB_RUN_NUMBER}-${short_sha}" >> "$GITHUB_OUTPUT"
+            echo 'build_matrix={"include":[{"arch":"arm64","runner":"macos-latest","asset_name":"Padium-darwin-arm64.zip"},{"arch":"x64","runner":"macos-13","asset_name":"Padium-darwin-x64.zip"}]}' >> "$GITHUB_OUTPUT"
+          fi
+
+  build-macos:
+    needs: prepare-release
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJson(needs.prepare-release.outputs.build_matrix) }}
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Select Xcode
+        run: sudo xcode-select -s /Applications/Xcode.app
+
+      - name: Build and package Padium.app
+        run: bash scripts/build-release.sh "${{ matrix.asset_name }}"
+
+      - name: Publish release asset
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ needs.prepare-release.outputs.release_tag }}
+          target_commitish: ${{ github.sha }}
+          prerelease: false
+          make_latest: true
+          files: ${{ matrix.asset_name }}
