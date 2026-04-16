@@ -2,7 +2,7 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
-INSTALL_DIR="${PADIUM_INSTALL_DIR:-$HOME/Applications}"
+INSTALL_DIR="${PADIUM_INSTALL_DIR:-/Applications}"
 INSTALL_APP="$INSTALL_DIR/Padium.app"
 
 if [[ -n "${PADIUM_SIGN_HASH:-}" ]]; then
@@ -61,7 +61,8 @@ if pgrep -x Padium >/dev/null 2>&1; then
 fi
 
 mkdir -p "$INSTALL_DIR"
-/usr/bin/rsync -a --delete "$BUILD_APP/" "$INSTALL_APP/"
+rm -rf "$INSTALL_APP"
+mv "$BUILD_APP" "$INSTALL_APP"
 codesign --force --deep --sign "$SIGN_HASH" "$INSTALL_APP"
 /usr/bin/touch "$INSTALL_APP"
 /System/Library/Frameworks/CoreServices.framework/Versions/Current/Frameworks/LaunchServices.framework/Versions/Current/Support/lsregister -f -R -trusted "$INSTALL_APP"
