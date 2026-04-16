@@ -8,6 +8,10 @@
 	<string>com.padium</string>
 	<key>CFBundleName</key>
 	<string>Padium</string>
+	<key>CFBundleExecutable</key>
+	<string>Padium</string>
+	<key>CFBundlePackageType</key>
+	<string>APPL</string>
 	<key>CFBundleVersion</key>
 	<string>1</string>
 	<key>CFBundleShortVersionString</key>
