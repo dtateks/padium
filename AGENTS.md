@@ -5,7 +5,7 @@
 **Branch:** unknown
 
 ## Project Overview
-macOS menu bar utility (Swift 5.9+, SwiftUI, Xcode). Trackpad swipe/tap gestures → keyboard shortcuts.
+macOS menu bar utility (Swift 5.9+, SwiftUI, Xcode). Trackpad swipe/tap/click gestures → keyboard shortcuts.
 Bundle ID: `com.padium`, version 0.1.0. LSUIElement=true (no Dock icon).
 
 **Scope**: owner-local MVP only — do NOT add packaging, export, distribution, or launch-at-login features.
@@ -29,7 +29,7 @@ Bundle ID: `com.padium`, version 0.1.0. LSUIElement=true (no Dock icon).
 - App only disables macOS system trackpad gestures for Padium slots that currently have configured shortcuts; unbound slots leave the original macOS gestures enabled. `SystemGestureManager` persists a backup to UserDefaults so crash recovery can restore on next launch
 - `SystemGestureManager` also auto-suppresses Smart Zoom via `TrackpadTwoFingerDoubleTapGesture` when the configured 2-finger double-tap slot is in use
 - `SystemGestureManager` only disables Dock gesture keys when all enabled vertical system gestures are being suppressed; partial vertical suppression leaves the other finger-count variant enabled
-- `ScrollSuppressor` uses a CGEventTap to consume scroll wheel events while 3+ fingers are active on the trackpad, preventing 2-finger scroll from firing during 3-finger gestures; tap/click suppression still activates only at 3+ fingers and it also suppresses momentum scroll after finger lift
+- `ScrollSuppressor` uses a CGEventTap to consume scroll wheel events while 3+ fingers are active on the trackpad, preventing 2-finger scroll from firing during 3-finger gestures; it also routes configured physical 3/4-finger click and double-click gestures through `AppState` and suppresses same-sequence touch taps so physical clicks take precedence
 
 ## Test
 - `xcodebuild -project Padium.xcodeproj -scheme Padium test`
@@ -52,7 +52,9 @@ PadiumApp (@main)
 ```
 
 ## Runtime Pipeline
-`OMSGestureSource` → touch frames → `GestureEngine` tracks a candidate only while finger count + touch IDs stay stable → `GestureClassifier.classifyIncremental()` for swipes or tap/double-tap arbitration on lift → emits once, then ignores further frames until lift → `AppState` for-await loop → `ShortcutEmitter` → `CGEvent` post
+Touch path: `OMSGestureSource` → touch frames → `GestureEngine` tracks a candidate only while finger count + touch IDs stay stable → `GestureClassifier.classifyIncremental()` for swipes or touch-tap/double-tap arbitration on lift → emits once, then ignores further frames until lift → `AppState` for-await loop → `ShortcutEmitter` → `CGEvent` post.
+
+Physical click path: `ScrollSuppressor` CGEventTap detects configured 3/4-finger left-click sequences, suppresses handled original left-click pairs, emits click/double-click `GestureEvent`s to `AppState`, and only blocks same-sequence touch-tap events after Padium actually claimed that physical click path.
 
 ## Key Contracts
 - `AppState` is the ONLY orchestration boundary — views toggle state, never run side effects
@@ -62,8 +64,9 @@ PadiumApp (@main)
 - XCTest launch path bypasses that prompt+quit behavior so host-app tests can execute.
 - `GestureEngine` commits only when finger count and touch identifiers remain stable; after emission it suppresses duplicates until a lift frame
 - `GestureClassifier` requires stable touch identifiers, dominant-axis commitment, and per-finger direction agreement; vertical swipes tolerate lateral drift while the dominant axis stays vertical
-- `GestureEngine` arbitrates tap vs double-tap recognition from raw touch frames; configured tap finger counts now include 1-finger and 2-finger double-tap slots in addition to the existing experimental 3-finger and 4-finger tap/double-tap slots
-- Shared sensitivity changes apply immediately without restarting the runtime for swipes only; `GestureClassifier` reads the current threshold live. UI sensitivity applies a +20 point base boost before threshold mapping, so default 50% behaves like the previous 70% calibration
+- `GestureEngine` is touch-only: it emits swipes plus touch tap/double-tap slots (1/2-finger double-tap and dedicated 3/4-finger tap/double-tap slots) and never emits physical click/double-click slots
+- Legacy 3/4 click slots keep their historical raw values (`threeFingerTap`, `threeFingerDoubleTap`, `fourFingerTap`, `fourFingerDoubleTap`) for persisted shortcut/action-kind compatibility; dedicated 3/4 touch tap slots use new raw values
+- Shared sensitivity changes apply immediately without restarting the runtime for swipes and touch taps; `GestureClassifier` reads the current swipe threshold live and tap travel tolerance uses the same boosted sensitivity curve. UI sensitivity applies a +20 point base boost before threshold mapping, so default 50% behaves like the previous 70% calibration
 - `AppState` refreshes live runtime/config state from `UserDefaults` changes; shortcut-binding changes must refresh conflict state and gesture routing together
 - `ShortcutRegistry.name(for:)` is the SINGLE source of truth for slot→`KeyboardShortcuts.Name` mapping — no ad-hoc Name creation elsewhere
 - Settings window: app launch starts permission polling immediately; menu-bar selection explicitly calls `openWindow(id: "settings")` and focuses the existing window; `onDisappear` resets `isSettingsPresented` to `false`

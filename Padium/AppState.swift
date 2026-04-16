@@ -67,6 +67,11 @@ extension SystemGestureManager: SystemGestureManaging {}
 
 @MainActor @Observable
 final class AppState {
+    private enum GestureEventSource {
+        case touch
+        case physicalClick
+    }
+
     private struct StoredConfiguration: Equatable {
         let configuredSlots: Set<GestureSlot>
         let gestureSensitivity: Double
@@ -211,6 +216,11 @@ final class AppState {
         gestureEngine.updateActiveSlots(configuredGestureSlots())
         guard runtimeTask == nil else { return }
 
+        ScrollSuppressor.shared.setPhysicalClickHandler { [weak self] event in
+            Task { @MainActor [weak self] in
+                self?.handleGestureEvent(event, source: .physicalClick)
+            }
+        }
         applySystemGestureSuppression()
         ScrollSuppressor.shared.start()
 
@@ -218,6 +228,7 @@ final class AppState {
             if let startError = gestureEngine.lastStartError {
                 PadiumLogger.gesture.error("Gesture engine failed to start: \(String(describing: startError), privacy: .public)")
             }
+            ScrollSuppressor.shared.setPhysicalClickHandler(nil)
             ScrollSuppressor.shared.stop()
             systemGestureManager.restore()
             return
@@ -226,15 +237,7 @@ final class AppState {
         runtimeTask = Task { @MainActor [weak self] in
             guard let self else { return }
             for await event in self.gestureEngine.events {
-                guard self.coordinator.isFullyGranted else { continue }
-                switch GestureActionStore.actionKind(for: event.slot) {
-                case .shortcut:
-                    _ = self.shortcutEmitter.emitConfiguredShortcut(for: event.slot)
-                case .middleClick:
-                    guard self.shouldEmitMiddleClick(for: event) else { continue }
-                    PadiumLogger.gesture.debug("TAP-DIAG: emitting middle click for \(event.slot.rawValue, privacy: .public)")
-                    _ = self.middleClickEmitter.emitMiddleClick()
-                }
+                self.handleGestureEvent(event, source: .touch)
             }
         }
     }
@@ -243,6 +246,7 @@ final class AppState {
         gestureEngine.stop()
         runtimeTask?.cancel()
         runtimeTask = nil
+        ScrollSuppressor.shared.setPhysicalClickHandler(nil)
         ScrollSuppressor.shared.stop()
         systemGestureManager.restore()
     }
@@ -302,13 +306,37 @@ final class AppState {
         )
     }
 
-    private func shouldEmitMiddleClick(for event: GestureEvent) -> Bool {
-        guard event.slot == .threeFingerTap else { return true }
-        guard ScrollSuppressor.shared.registerGestureMiddleClickIfNeeded(at: event.timestamp) else {
-            PadiumLogger.gesture.debug("TAP-DIAG: suppressing duplicate tap middle click for \(event.slot.rawValue, privacy: .public)")
+    private func handleGestureEvent(_ event: GestureEvent, source: GestureEventSource) {
+        guard coordinator.isFullyGranted else { return }
+
+        if source == .touch, !shouldHandleTouchEvent(event) {
+            return
+        }
+
+        switch actionKind(for: event.slot) {
+        case .shortcut:
+            _ = shortcutEmitter.emitConfiguredShortcut(for: event.slot)
+        case .middleClick:
+            PadiumLogger.gesture.debug("TAP-DIAG: emitting middle click for \(event.slot.rawValue, privacy: .public)")
+            _ = middleClickEmitter.emitMiddleClick()
+        }
+    }
+
+    private func shouldHandleTouchEvent(_ event: GestureEvent) -> Bool {
+        guard event.slot.isTouchTapGesture else { return true }
+        guard ScrollSuppressor.shared.shouldAllowTouchTap(
+            fingerCount: event.slot.fingerCount,
+            at: event.timestamp
+        ) else {
+            PadiumLogger.gesture.debug("TAP-DIAG: suppressing touch tap after physical click for \(event.slot.rawValue, privacy: .public)")
             return false
         }
         return true
+    }
+
+    private func actionKind(for slot: GestureSlot) -> GestureActionKind {
+        guard slot.supportsActionKindChoice else { return .shortcut }
+        return GestureActionStore.actionKind(for: slot)
     }
 }
 

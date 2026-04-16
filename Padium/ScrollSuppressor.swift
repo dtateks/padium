@@ -1,5 +1,37 @@
+import AppKit
 import CoreGraphics
 import Foundation
+
+protocol PhysicalClickScheduledWork: AnyObject {
+    func cancel()
+}
+
+protocol PhysicalClickScheduling: AnyObject {
+    @discardableResult
+    func schedule(after delay: TimeInterval, action: @escaping @Sendable () -> Void) -> any PhysicalClickScheduledWork
+}
+
+final class DispatchPhysicalClickScheduler: PhysicalClickScheduling {
+    @discardableResult
+    func schedule(after delay: TimeInterval, action: @escaping @Sendable () -> Void) -> any PhysicalClickScheduledWork {
+        DispatchPhysicalClickWork(delay: delay, action: action)
+    }
+}
+
+final class DispatchPhysicalClickWork: PhysicalClickScheduledWork {
+    private var workItem: DispatchWorkItem?
+
+    init(delay: TimeInterval, action: @escaping @Sendable () -> Void) {
+        let item = DispatchWorkItem(block: action)
+        self.workItem = item
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: item)
+    }
+
+    func cancel() {
+        workItem?.cancel()
+        workItem = nil
+    }
+}
 
 /// Suppresses macOS scroll wheel events while 3+ finger multitouch is active.
 ///
@@ -7,16 +39,22 @@ import Foundation
 /// `leftMouseDown`, and `leftMouseUp` events. When `isMultitouchActive` is true,
 /// scroll events (including subsequent momentum events) are consumed so they don't
 /// reach the active window. Physical left clicks with 3+ fingers can also be
-/// converted to middle-click events when the 3-finger tap slot is configured for it.
+/// routed through AppState as click/double-click gesture events when configured.
 ///
 /// Thread-safety: `isMultitouchActive` is set from the OMS touch callback thread
 /// and read from the CGEventTap callback thread. Uses `os_unfair_lock` for safety.
 final class ScrollSuppressor: @unchecked Sendable {
 
+    typealias PhysicalClickHandler = @Sendable (GestureEvent) -> Void
+
+    private struct PendingPhysicalClick {
+        let singleSlot: GestureSlot?
+        let work: any PhysicalClickScheduledWork
+    }
+
     enum EventDisposition {
         case passThrough
         case suppress
-        case replace(CGEvent)
     }
 
     static let shared = ScrollSuppressor()
@@ -24,11 +62,11 @@ final class ScrollSuppressor: @unchecked Sendable {
 
     private enum LeftMouseState {
         case idle
-        case suppressingOriginalPair
-        case convertingPair
+        case suppressingHandledPair
     }
 
-    private static let middleClickDedupWindow: TimeInterval = 0.5
+    private static let physicalClickDedupWindow: TimeInterval = 0.5
+    private static let physicalDoubleClickWindow: TimeInterval = NSEvent.doubleClickInterval
     private static let middleMouseButtonNumber = Int64(CGMouseButton.center.rawValue)
 
     // MARK: - Thread-safe multitouch flag
@@ -38,8 +76,15 @@ final class ScrollSuppressor: @unchecked Sendable {
     private var _currentFingerCount = 0
     private var _suppressMomentum = false
     private var _leftMouseState: LeftMouseState = .idle
-    private var _lastTapMiddleClickAt: TimeInterval?
-    private var _lastPhysicalMiddleClickAt: TimeInterval?
+    private var _lastPhysicalClickAtByFingerCount: [Int: TimeInterval] = [:]
+    private var _pendingPhysicalClicksByFingerCount: [Int: PendingPhysicalClick] = [:]
+    private var _physicalClickHandler: PhysicalClickHandler?
+
+    private let clickScheduler: any PhysicalClickScheduling
+
+    init(clickScheduler: (any PhysicalClickScheduling)? = nil) {
+        self.clickScheduler = clickScheduler ?? DispatchPhysicalClickScheduler()
+    }
 
     /// Set to `true` when 3+ fingers are actively touching the trackpad.
     /// Set to `false` when fingers lift.
@@ -151,38 +196,53 @@ final class ScrollSuppressor: @unchecked Sendable {
         _currentFingerCount = 0
         _suppressMomentum = false
         _leftMouseState = .idle
-        _lastTapMiddleClickAt = nil
-        _lastPhysicalMiddleClickAt = nil
+        _lastPhysicalClickAtByFingerCount = [:]
+        for pendingClick in _pendingPhysicalClicksByFingerCount.values {
+            pendingClick.work.cancel()
+        }
+        _pendingPhysicalClicksByFingerCount = [:]
+        _physicalClickHandler = nil
         os_unfair_lock_unlock(&_lock)
 
         PadiumLogger.gesture.info("Scroll suppressor stopped")
     }
 
-    @discardableResult
-    func registerGestureMiddleClickIfNeeded(at timestamp: Date) -> Bool {
+    func setPhysicalClickHandler(_ handler: PhysicalClickHandler?) {
+        os_unfair_lock_lock(&_lock)
+        _physicalClickHandler = handler
+        os_unfair_lock_unlock(&_lock)
+    }
+
+    func shouldAllowTouchTap(fingerCount: Int, at timestamp: Date) -> Bool {
+        guard fingerCount >= 3 else { return true }
         let referenceTime = timestamp.timeIntervalSinceReferenceDate
 
         os_unfair_lock_lock(&_lock)
         defer { os_unfair_lock_unlock(&_lock) }
 
-        guard _leftMouseState == .idle else { return false }
-        guard !isWithinDedupWindow(at: referenceTime, since: _lastPhysicalMiddleClickAt) else {
+        guard !isWithinDedupWindow(
+            at: referenceTime,
+            since: _lastPhysicalClickAtByFingerCount[fingerCount]
+        ) else {
             return false
         }
-
-        _lastTapMiddleClickAt = referenceTime
         return true
     }
 
     func eventDisposition(for type: CGEventType, event: CGEvent) -> EventDisposition {
-        let isMiddleClickConfigured = GestureActionStore.actionKind(for: .threeFingerTap) == .middleClick
-        return eventDisposition(for: type, event: event, isMiddleClickConfigured: isMiddleClickConfigured)
+        eventDisposition(
+            for: type,
+            event: event,
+            configuredClickSlotsResolver: { fingerCount in
+                self.configuredClickSlots(for: fingerCount)
+            }
+        )
     }
 
     func eventDisposition(
         for type: CGEventType,
         event: CGEvent,
-        isMiddleClickConfigured: Bool
+        configuredClickSlotsResolver: (Int) -> (single: GestureSlot?, double: GestureSlot?)
     ) -> EventDisposition {
         switch type {
         case .scrollWheel:
@@ -191,7 +251,7 @@ final class ScrollSuppressor: @unchecked Sendable {
             return leftMouseDisposition(
                 for: type,
                 event: event,
-                isMiddleClickConfigured: isMiddleClickConfigured
+                configuredClickSlotsResolver: configuredClickSlotsResolver
             )
         default:
             return .passThrough
@@ -245,59 +305,105 @@ final class ScrollSuppressor: @unchecked Sendable {
     fileprivate func leftMouseDisposition(
         for type: CGEventType,
         event: CGEvent,
-        isMiddleClickConfigured: Bool
+        configuredClickSlotsResolver: (Int) -> (single: GestureSlot?, double: GestureSlot?)
     ) -> EventDisposition {
         if event.getIntegerValueField(.eventSourceUserData) == Self.syntheticMiddleClickMarker {
             return .passThrough
         }
 
         let referenceTime = Date().timeIntervalSinceReferenceDate
+        let clickState = max(event.getIntegerValueField(.mouseEventClickState), 1)
+        let eventTimestamp = Date(timeIntervalSinceReferenceDate: referenceTime)
+        var eventToDispatch: GestureEvent?
+        var clickHandler: PhysicalClickHandler?
+        var disposition: EventDisposition = .passThrough
 
         os_unfair_lock_lock(&_lock)
-        defer { os_unfair_lock_unlock(&_lock) }
 
         if type == .leftMouseUp {
-            switch _leftMouseState {
-            case .convertingPair:
-                guard let convertedEvent = Self.makeMiddleClickEvent(from: event, mouseType: .otherMouseUp) else {
-                    _leftMouseState = .idle
-                    PadiumLogger.gesture.error("Failed to convert physical click up to middle click")
-                    return .passThrough
-                }
+            if _leftMouseState == .suppressingHandledPair {
                 _leftMouseState = .idle
-                _lastPhysicalMiddleClickAt = referenceTime
-                PadiumLogger.gesture.debug("TAP-DIAG: converting physical click up to middle click")
-                return .replace(convertedEvent)
-            case .suppressingOriginalPair:
-                _leftMouseState = .idle
-                PadiumLogger.gesture.debug("TAP-DIAG: suppressing duplicate physical click up after tap middle click")
-                return .suppress
-            case .idle:
-                break
+                disposition = .suppress
             }
+            os_unfair_lock_unlock(&_lock)
+            return disposition
         }
 
-        guard type == .leftMouseDown,
-              isMiddleClickConfigured,
-              _currentFingerCount >= 3 else {
+        guard type == .leftMouseDown else {
+            os_unfair_lock_unlock(&_lock)
             return .passThrough
         }
 
-        if isWithinDedupWindow(at: referenceTime, since: _lastTapMiddleClickAt) {
-            _leftMouseState = .suppressingOriginalPair
-            PadiumLogger.gesture.debug("TAP-DIAG: suppressing duplicate physical click down after tap middle click")
-            return .suppress
-        }
+        let fingerCount = _currentFingerCount
 
-        guard let convertedEvent = Self.makeMiddleClickEvent(from: event, mouseType: .otherMouseDown) else {
-            PadiumLogger.gesture.error("Failed to convert physical click down to middle click")
+        let configuredSlots = configuredClickSlotsResolver(fingerCount)
+        guard configuredSlots.single != nil || configuredSlots.double != nil else {
+            os_unfair_lock_unlock(&_lock)
             return .passThrough
         }
 
-        _leftMouseState = .convertingPair
-        _lastPhysicalMiddleClickAt = referenceTime
-        PadiumLogger.gesture.debug("TAP-DIAG: converting physical click down to middle click fc=\(self._currentFingerCount)")
-        return .replace(convertedEvent)
+        if (3...4).contains(fingerCount) {
+            _lastPhysicalClickAtByFingerCount[fingerCount] = referenceTime
+        }
+
+        _leftMouseState = .suppressingHandledPair
+        disposition = .suppress
+
+        if let doubleSlot = configuredSlots.double,
+           clickState >= 2 {
+            if let pendingClick = _pendingPhysicalClicksByFingerCount.removeValue(forKey: fingerCount) {
+                pendingClick.work.cancel()
+            }
+            eventToDispatch = GestureEvent(slot: doubleSlot, timestamp: eventTimestamp)
+            clickHandler = _physicalClickHandler
+        } else if configuredSlots.double != nil {
+            if let pendingClick = _pendingPhysicalClicksByFingerCount.removeValue(forKey: fingerCount) {
+                pendingClick.work.cancel()
+            }
+            let scheduledWork = clickScheduler.schedule(after: Self.physicalDoubleClickWindow) { [weak self] in
+                self?.finalizePendingPhysicalClick(for: fingerCount, at: eventTimestamp)
+            }
+            _pendingPhysicalClicksByFingerCount[fingerCount] = PendingPhysicalClick(
+                singleSlot: configuredSlots.single,
+                work: scheduledWork
+            )
+        } else if let singleSlot = configuredSlots.single {
+            eventToDispatch = GestureEvent(slot: singleSlot, timestamp: eventTimestamp)
+            clickHandler = _physicalClickHandler
+        }
+
+        os_unfair_lock_unlock(&_lock)
+
+        if let eventToDispatch, let clickHandler {
+            clickHandler(eventToDispatch)
+        }
+
+        if let eventToDispatch {
+            PadiumLogger.gesture.debug("TAP-DIAG: handled physical click fc=\(fingerCount) slot=\(eventToDispatch.slot.rawValue, privacy: .public)")
+        }
+        return disposition
+    }
+
+    private func finalizePendingPhysicalClick(for fingerCount: Int, at timestamp: Date) {
+        var eventToDispatch: GestureEvent?
+        var clickHandler: PhysicalClickHandler?
+
+        os_unfair_lock_lock(&_lock)
+        guard let pendingClick = _pendingPhysicalClicksByFingerCount.removeValue(forKey: fingerCount) else {
+            os_unfair_lock_unlock(&_lock)
+            return
+        }
+        pendingClick.work.cancel()
+
+        if let singleSlot = pendingClick.singleSlot {
+            eventToDispatch = GestureEvent(slot: singleSlot, timestamp: timestamp)
+            clickHandler = _physicalClickHandler
+        }
+        os_unfair_lock_unlock(&_lock)
+
+        if let eventToDispatch, let clickHandler {
+            clickHandler(eventToDispatch)
+        }
     }
 
     static func configureMiddleClickEvent(_ event: CGEvent, clickState: Int64) {
@@ -308,26 +414,30 @@ final class ScrollSuppressor: @unchecked Sendable {
 
     private func isWithinDedupWindow(at referenceTime: TimeInterval, since priorTime: TimeInterval?) -> Bool {
         guard let priorTime else { return false }
-        return referenceTime - priorTime <= Self.middleClickDedupWindow
+        return referenceTime - priorTime <= Self.physicalClickDedupWindow
     }
 
-    private static func makeMiddleClickEvent(from event: CGEvent, mouseType: CGEventType) -> CGEvent? {
-        guard let source = CGEventSource(stateID: .hidSystemState),
-              let convertedEvent = CGEvent(
-                mouseEventSource: source,
-                mouseType: mouseType,
-                mouseCursorPosition: event.location,
-                mouseButton: .center
-              )
-        else {
-            return nil
+    private func configuredClickSlots(for fingerCount: Int) -> (single: GestureSlot?, double: GestureSlot?) {
+        guard let clickSlots = Self.clickSlots(for: fingerCount) else {
+            return (nil, nil)
         }
 
-        convertedEvent.flags = event.flags
-        let clickState = max(event.getIntegerValueField(.mouseEventClickState), 1)
-        configureMiddleClickEvent(convertedEvent, clickState: clickState)
-        return convertedEvent
+        let single = clickSlots.single.isConfigured ? clickSlots.single : nil
+        let double = clickSlots.double.isConfigured ? clickSlots.double : nil
+        return (single, double)
     }
+
+    private static func clickSlots(for fingerCount: Int) -> (single: GestureSlot, double: GestureSlot)? {
+        switch fingerCount {
+        case 3:
+            (.threeFingerClick, .threeFingerDoubleClick)
+        case 4:
+            (.fourFingerClick, .fourFingerDoubleClick)
+        default:
+            nil
+        }
+    }
+
 }
 
 private func scrollTapCallback(
@@ -352,7 +462,5 @@ private func scrollTapCallback(
         return Unmanaged.passUnretained(event)
     case .suppress:
         return nil
-    case .replace(let replacement):
-        return Unmanaged.passRetained(replacement)
     }
 }

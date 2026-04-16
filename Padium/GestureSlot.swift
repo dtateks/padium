@@ -8,19 +8,25 @@ enum GestureSlot: String, CaseIterable, Sendable {
     case threeFingerSwipeRight
     case threeFingerSwipeUp
     case threeFingerSwipeDown
-    case threeFingerTap
-    case threeFingerDoubleTap
+    case threeFingerClick = "threeFingerTap"
+    case threeFingerDoubleClick = "threeFingerDoubleTap"
+    case threeFingerTap = "threeFingerTouchTap"
+    case threeFingerDoubleTap = "threeFingerTouchDoubleTap"
     case fourFingerSwipeLeft
     case fourFingerSwipeRight
     case fourFingerSwipeUp
     case fourFingerSwipeDown
-    case fourFingerTap
-    case fourFingerDoubleTap
+    case fourFingerClick = "fourFingerTap"
+    case fourFingerDoubleClick = "fourFingerDoubleTap"
+    case fourFingerTap = "fourFingerTouchTap"
+    case fourFingerDoubleTap = "fourFingerTouchDoubleTap"
 
     enum Kind: Sendable {
         case swipe
         case tap
         case doubleTap
+        case click
+        case doubleClick
     }
 
     var kind: Kind {
@@ -28,6 +34,8 @@ enum GestureSlot: String, CaseIterable, Sendable {
         case .oneFingerDoubleTap, .twoFingerDoubleTap,
              .threeFingerDoubleTap, .fourFingerDoubleTap:
             .doubleTap
+        case .threeFingerDoubleClick, .fourFingerDoubleClick:
+            .doubleClick
         case .threeFingerSwipeLeft, .threeFingerSwipeRight,
              .threeFingerSwipeUp, .threeFingerSwipeDown,
              .fourFingerSwipeLeft, .fourFingerSwipeRight,
@@ -35,6 +43,8 @@ enum GestureSlot: String, CaseIterable, Sendable {
             .swipe
         case .threeFingerTap, .fourFingerTap:
             .tap
+        case .threeFingerClick, .fourFingerClick:
+            .click
         }
     }
 
@@ -46,17 +56,27 @@ enum GestureSlot: String, CaseIterable, Sendable {
             2
         case .threeFingerSwipeLeft, .threeFingerSwipeRight,
              .threeFingerSwipeUp, .threeFingerSwipeDown,
+             .threeFingerClick, .threeFingerDoubleClick,
              .threeFingerTap, .threeFingerDoubleTap:
             3
         case .fourFingerSwipeLeft, .fourFingerSwipeRight,
              .fourFingerSwipeUp, .fourFingerSwipeDown,
+             .fourFingerClick, .fourFingerDoubleClick,
              .fourFingerTap, .fourFingerDoubleTap:
             4
         }
     }
 
     var isTapGesture: Bool {
+        kind == .tap || kind == .doubleTap || kind == .click || kind == .doubleClick
+    }
+
+    var isTouchTapGesture: Bool {
         kind == .tap || kind == .doubleTap
+    }
+
+    var isPhysicalClickGesture: Bool {
+        kind == .click || kind == .doubleClick
     }
 
     var tapSlot: GestureSlot? {
@@ -95,12 +115,16 @@ enum GestureSlot: String, CaseIterable, Sendable {
         case .threeFingerSwipeRight: "Swipe Right"
         case .threeFingerSwipeUp:    "Swipe Up"
         case .threeFingerSwipeDown:  "Swipe Down"
+        case .threeFingerClick:      "Click"
+        case .threeFingerDoubleClick: "Double Click"
         case .threeFingerTap:        "Tap"
         case .threeFingerDoubleTap:  "Double Tap"
         case .fourFingerSwipeLeft:   "Swipe Left"
         case .fourFingerSwipeRight:  "Swipe Right"
         case .fourFingerSwipeUp:     "Swipe Up"
         case .fourFingerSwipeDown:   "Swipe Down"
+        case .fourFingerClick:       "Click"
+        case .fourFingerDoubleClick: "Double Click"
         case .fourFingerTap:         "Tap"
         case .fourFingerDoubleTap:   "Double Tap"
         }
@@ -114,10 +138,12 @@ enum GestureSlot: String, CaseIterable, Sendable {
             "2 Finger"
         case .threeFingerSwipeLeft, .threeFingerSwipeRight,
              .threeFingerSwipeUp,   .threeFingerSwipeDown,
+             .threeFingerClick,     .threeFingerDoubleClick,
              .threeFingerTap,       .threeFingerDoubleTap:
             "3 Finger"
         case .fourFingerSwipeLeft, .fourFingerSwipeRight,
              .fourFingerSwipeUp,   .fourFingerSwipeDown,
+             .fourFingerClick,     .fourFingerDoubleClick,
              .fourFingerTap,       .fourFingerDoubleTap:
             "4 Finger"
         }
@@ -125,13 +151,15 @@ enum GestureSlot: String, CaseIterable, Sendable {
 
     /// Whether this slot supports choosing between keyboard shortcut and middle click.
     var supportsActionKindChoice: Bool {
-        kind == .tap
+        kind == .click
     }
 
     /// Resolves the effective action for this slot.
-    /// Tap/doubleTap slots with `.middleClick` action kind are configured even without a shortcut.
+    /// Click slots with `.middleClick` action kind are configured even without a shortcut.
     var isConfigured: Bool {
-        if GestureActionStore.actionKind(for: self) == .middleClick { return true }
+        if supportsActionKindChoice && GestureActionStore.actionKind(for: self) == .middleClick {
+            return true
+        }
         return KeyboardShortcuts.getShortcut(for: ShortcutRegistry.name(for: self)) != nil
     }
 }

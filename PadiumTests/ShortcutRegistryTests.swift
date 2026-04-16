@@ -34,6 +34,39 @@ struct ShortcutRegistryTests {
         #expect(run1 == run2)
     }
 
+    @Test func higherFingerClickLabelsStayClickBased() {
+        #expect(GestureSlot.threeFingerClick.displayName == "Click")
+        #expect(GestureSlot.threeFingerDoubleClick.displayName == "Double Click")
+        #expect(GestureSlot.fourFingerClick.displayName == "Click")
+        #expect(GestureSlot.fourFingerDoubleClick.displayName == "Double Click")
+    }
+
+    @Test func higherFingerTouchTapLabelsStayTapBased() {
+        #expect(GestureSlot.threeFingerTap.displayName == "Tap")
+        #expect(GestureSlot.threeFingerDoubleTap.displayName == "Double Tap")
+        #expect(GestureSlot.fourFingerTap.displayName == "Tap")
+        #expect(GestureSlot.fourFingerDoubleTap.displayName == "Double Tap")
+    }
+
+    @Test func legacyClickRawValuesRemainStable() {
+        #expect(GestureSlot.threeFingerClick.rawValue == "threeFingerTap")
+        #expect(GestureSlot.threeFingerDoubleClick.rawValue == "threeFingerDoubleTap")
+        #expect(GestureSlot.fourFingerClick.rawValue == "fourFingerTap")
+        #expect(GestureSlot.fourFingerDoubleClick.rawValue == "fourFingerDoubleTap")
+    }
+
+    @Test func newTouchTapRawValuesAreDistinctFromLegacyClickKeys() {
+        #expect(GestureSlot.threeFingerTap.rawValue == "threeFingerTouchTap")
+        #expect(GestureSlot.threeFingerDoubleTap.rawValue == "threeFingerTouchDoubleTap")
+        #expect(GestureSlot.fourFingerTap.rawValue == "fourFingerTouchTap")
+        #expect(GestureSlot.fourFingerDoubleTap.rawValue == "fourFingerTouchDoubleTap")
+    }
+
+    @Test func oneAndTwoFingerDoubleTapLabelsStayTapBased() {
+        #expect(GestureSlot.oneFingerDoubleTap.displayName == "Double Tap")
+        #expect(GestureSlot.twoFingerDoubleTap.displayName == "Double Tap")
+    }
+
     @Test @MainActor func allVerticalGesturesSuppressedDisablesDockKeys() {
         // When ALL enabled vertical system gestures are being suppressed,
         // Dock keys should be disabled.

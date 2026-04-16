@@ -194,6 +194,15 @@ struct GestureEngineTests {
         }
     }
 
+    private func restoreGestureSensitivity(from originalValue: Double?) {
+        if let originalValue {
+            GestureSensitivitySetting.store(originalValue)
+        } else {
+            GestureSensitivitySetting.clearStoredValue()
+        }
+        UserDefaults.standard.synchronize()
+    }
+
     private func performTap(
         source: StubGestureSource,
         scheduler: ManualGestureScheduler,
@@ -777,6 +786,33 @@ struct GestureEngineTests {
         await collectionTask.value
     }
 
+    @Test func clickSlotsDoNotEmitFromTouchTapPipeline() async {
+        let source = StubGestureSource()
+        let scheduler = ManualGestureScheduler()
+        let engine = makeEngine(
+            source: source,
+            supportedSlots: [.threeFingerClick, .threeFingerDoubleClick],
+            scheduler: scheduler
+        )
+        engine.start()
+
+        let collector = EventCollector()
+        let collectionTask = collector.collect(from: engine.events)
+
+        await performTap(
+            source: source,
+            scheduler: scheduler,
+            frames: makeTapFrames(fingerCount: 3)
+        )
+        scheduler.advance(by: GestureTapSettings.doubleTapWindow + 0.01)
+        await flushPipeline()
+
+        #expect(collector.events.isEmpty)
+
+        engine.stop()
+        await collectionTask.value
+    }
+
     @Test func tapDoesNotEmitWhenTravelExceedsThreshold() async {
         let source = StubGestureSource()
         let scheduler = ManualGestureScheduler()
@@ -800,6 +836,67 @@ struct GestureEngineTests {
 
         engine.stop()
         await collectionTask.value
+    }
+
+    @Test func higherSensitivityMakesTapTravelMoreForgiving() async {
+        let originalSensitivity = UserDefaults.standard.object(forKey: "gesture.sensitivity") as? Double
+        defer { restoreGestureSensitivity(from: originalSensitivity) }
+
+        GestureSensitivitySetting.store(0.0)
+        UserDefaults.standard.synchronize()
+
+        do {
+            let source = StubGestureSource()
+            let scheduler = ManualGestureScheduler()
+            let engine = makeEngine(
+                source: source,
+                supportedSlots: [.threeFingerTap],
+                scheduler: scheduler
+            )
+            engine.start()
+
+            let collector = EventCollector()
+            let collectionTask = collector.collect(from: engine.events)
+
+            await performTap(
+                source: source,
+                scheduler: scheduler,
+                frames: makeTapFrames(fingerCount: 3, endX: 0.543, endY: 0.50)
+            )
+
+            #expect(collector.events.isEmpty)
+
+            engine.stop()
+            await collectionTask.value
+        }
+
+        GestureSensitivitySetting.store(1.0)
+        UserDefaults.standard.synchronize()
+
+        do {
+            let source = StubGestureSource()
+            let scheduler = ManualGestureScheduler()
+            let engine = makeEngine(
+                source: source,
+                supportedSlots: [.threeFingerTap],
+                scheduler: scheduler
+            )
+            engine.start()
+
+            let collector = EventCollector()
+            let collectionTask = collector.collect(from: engine.events)
+
+            await performTap(
+                source: source,
+                scheduler: scheduler,
+                frames: makeTapFrames(fingerCount: 3, endX: 0.543, endY: 0.50)
+            )
+
+            #expect(collector.events.map(\.slot) == [.threeFingerTap])
+
+            engine.stop()
+            await collectionTask.value
+        }
     }
 
     @Test func stopCancelsPendingSingleTapEmission() async {

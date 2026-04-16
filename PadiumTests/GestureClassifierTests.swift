@@ -98,6 +98,19 @@ struct GestureClassifierTests {
         #expect(highSensitivity < lowSensitivity)
     }
 
+    @Test func defaultSensitivityMapsToCurrentTapTravelThreshold() {
+        let midpointThreshold = GestureSensitivitySetting.tapTravelThreshold(for: GestureSensitivitySetting.defaultValue)
+        let calibratedDefaultThreshold: Float = 0.061
+
+        #expect(abs(midpointThreshold - calibratedDefaultThreshold) < 0.0001)
+    }
+
+    @Test func higherSensitivityRaisesTapTravelThreshold() {
+        let lowSensitivity = GestureSensitivitySetting.tapTravelThreshold(for: 0.2)
+        let highSensitivity = GestureSensitivitySetting.tapTravelThreshold(for: 0.8)
+        #expect(highSensitivity > lowSensitivity)
+    }
+
     @Test func liveSensitivityUpdatesApplyWithoutRecreatingClassifier() {
         let liveThreshold = ThresholdBox(0.12)
         let classifier = GestureClassifier(swipeThresholdProvider: { liveThreshold.value })

@@ -1,5 +1,6 @@
 import Testing
 @testable import Padium
+import AppKit
 import ApplicationServices
 import Foundation
 import KeyboardShortcuts
@@ -154,6 +155,22 @@ struct AppStateTests {
         ScrollSuppressor.shared.stop()
     }
 
+    private func makeLeftClickEvent(_ type: CGEventType, clickState: Int64 = 1) -> CGEvent {
+        guard let source = CGEventSource(stateID: .hidSystemState),
+              let event = CGEvent(
+                mouseEventSource: source,
+                mouseType: type,
+                mouseCursorPosition: CGPoint(x: 40, y: 60),
+                mouseButton: .left
+              )
+        else {
+            fatalError("Failed to create left-click test event")
+        }
+
+        event.setIntegerValueField(.mouseEventClickState, value: clickState)
+        return event
+    }
+
     @Test @MainActor func initialStateNotRunning() {
         let preservedConfig = GestureConfigurationPreserver()
         let state = makeState(checker: MockPermissionChecker())
@@ -216,12 +233,12 @@ struct AppStateTests {
         _ = preservedConfig
     }
 
-    @Test @MainActor func runtimeEmitsMiddleClickWhenThreeFingerTapUsesMiddleClickAction() async {
+    @Test @MainActor func runtimeEmitsMiddleClickWhenThreeFingerClickUsesMiddleClickAction() async {
         let preservedConfig = GestureConfigurationPreserver()
         clearAllShortcutBindings()
         defer { clearAllShortcutBindings() }
 
-        GestureActionStore.setActionKind(.middleClick, for: .threeFingerTap)
+        GestureActionStore.setActionKind(.middleClick, for: .threeFingerClick)
 
         let checker = MockPermissionChecker(accessibility: true)
         let runtime = RecordingGestureRuntime()
@@ -235,7 +252,7 @@ struct AppStateTests {
         state.refreshPermissions()
         await pumpEventLoop()
 
-        runtime.yield(.threeFingerTap)
+        runtime.yield(.threeFingerClick)
         await pumpEventLoop()
 
         #expect(middleClickEmitter.emitCallCount == 1)
@@ -426,10 +443,103 @@ struct AppStateTests {
         )
         #expect(runtime.activeSlotsHistory.last == [])
 
-        GestureActionStore.setActionKind(.middleClick, for: .threeFingerTap)
+        GestureActionStore.setActionKind(.middleClick, for: .threeFingerClick)
         state.handleShortcutConfigurationChange()
 
-        #expect(runtime.activeSlotsHistory.last == [.threeFingerTap])
+        #expect(runtime.activeSlotsHistory.last == [.threeFingerClick])
+        _ = preservedConfig
+    }
+
+    @Test @MainActor func physicalClickTakesPrecedenceOverTouchTapForSameSequence() async {
+        let preservedConfig = GestureConfigurationPreserver()
+        let checker = MockPermissionChecker(accessibility: true)
+        let runtime = RecordingGestureRuntime()
+        let emitter = RecordingShortcutEmitter()
+        clearAllShortcutBindings()
+        defer { clearAllShortcutBindings() }
+
+        KeyboardShortcuts.setShortcut(.init(.f13, modifiers: []), for: ShortcutRegistry.name(for: .threeFingerClick))
+        KeyboardShortcuts.setShortcut(.init(.f14, modifiers: []), for: ShortcutRegistry.name(for: .threeFingerTap))
+
+        let state = makeState(checker: checker, runtime: runtime, emitter: emitter)
+        state.refreshPermissions()
+        await pumpEventLoop()
+
+        ScrollSuppressor.shared.currentFingerCount = 3
+        let physicalDown = makeLeftClickEvent(.leftMouseDown)
+        let physicalUp = makeLeftClickEvent(.leftMouseUp)
+
+        switch ScrollSuppressor.shared.eventDisposition(for: .leftMouseDown, event: physicalDown) {
+        case .suppress:
+            break
+        case .passThrough:
+            Issue.record("Expected configured physical click down to be suppressed")
+        }
+
+        switch ScrollSuppressor.shared.eventDisposition(for: .leftMouseUp, event: physicalUp) {
+        case .suppress:
+            break
+        case .passThrough:
+            Issue.record("Expected configured physical click up to be suppressed")
+        }
+
+        await pumpEventLoop()
+        #expect(emitter.emittedSlots == [.threeFingerClick])
+
+        runtime.yield(.threeFingerTap)
+        await pumpEventLoop()
+        #expect(emitter.emittedSlots == [.threeFingerClick])
+
+        _ = state
+        _ = preservedConfig
+    }
+
+    @Test @MainActor func unhandledPhysicalClickDoesNotBlockTouchTap() async {
+        let preservedConfig = GestureConfigurationPreserver()
+        let checker = MockPermissionChecker(accessibility: true)
+        let runtime = RecordingGestureRuntime()
+        let emitter = RecordingShortcutEmitter()
+        clearAllShortcutBindings()
+        defer { clearAllShortcutBindings() }
+
+        KeyboardShortcuts.setShortcut(.init(.f14, modifiers: []), for: ShortcutRegistry.name(for: .threeFingerTap))
+
+        let state = makeState(checker: checker, runtime: runtime, emitter: emitter)
+        state.refreshPermissions()
+        await pumpEventLoop()
+
+        ScrollSuppressor.shared.currentFingerCount = 3
+        let physicalDown = makeLeftClickEvent(.leftMouseDown)
+        let physicalUp = makeLeftClickEvent(.leftMouseUp)
+
+        switch ScrollSuppressor.shared.eventDisposition(
+            for: .leftMouseDown,
+            event: physicalDown,
+            configuredClickSlotsResolver: { _ in (nil, nil) }
+        ) {
+        case .passThrough:
+            break
+        case .suppress:
+            Issue.record("Expected unconfigured physical click down to pass through")
+        }
+
+        switch ScrollSuppressor.shared.eventDisposition(
+            for: .leftMouseUp,
+            event: physicalUp,
+            configuredClickSlotsResolver: { _ in (nil, nil) }
+        ) {
+        case .passThrough:
+            break
+        case .suppress:
+            Issue.record("Expected unconfigured physical click up to pass through")
+        }
+
+        runtime.yield(.threeFingerTap)
+        await pumpEventLoop()
+
+        #expect(emitter.emittedSlots == [.threeFingerTap])
+
+        _ = state
         _ = preservedConfig
     }
 
@@ -504,7 +614,68 @@ struct AppStateTests {
 @MainActor
 struct ScrollSuppressorTests {
 
-    private func makeLeftClickEvent(_ type: CGEventType) -> CGEvent {
+    private final class SlotRecorder: @unchecked Sendable {
+        var slots: [GestureSlot] = []
+    }
+
+    private final class ManualPhysicalClickScheduler: PhysicalClickScheduling {
+        final class ScheduledWork: PhysicalClickScheduledWork {
+            private(set) var isCancelled = false
+
+            func cancel() {
+                isCancelled = true
+            }
+        }
+
+        private struct ScheduledAction {
+            let fireDate: Date
+            let work: ScheduledWork
+            let action: @Sendable () -> Void
+        }
+
+        private(set) var now: Date
+        private var scheduledActions: [ScheduledAction] = []
+
+        init(now: Date = Date(timeIntervalSinceReferenceDate: 0)) {
+            self.now = now
+        }
+
+        @discardableResult
+        func schedule(after delay: TimeInterval, action: @escaping @Sendable () -> Void) -> any PhysicalClickScheduledWork {
+            let work = ScheduledWork()
+            scheduledActions.append(
+                ScheduledAction(
+                    fireDate: now.addingTimeInterval(delay),
+                    work: work,
+                    action: action
+                )
+            )
+            return work
+        }
+
+        func advance(by delay: TimeInterval) {
+            now = now.addingTimeInterval(delay)
+            runDueActions()
+        }
+
+        private func runDueActions() {
+            while let index = nextDueActionIndex() {
+                let scheduledAction = scheduledActions.remove(at: index)
+                if !scheduledAction.work.isCancelled {
+                    scheduledAction.action()
+                }
+                scheduledActions.removeAll { $0.work.isCancelled }
+            }
+        }
+
+        private func nextDueActionIndex() -> Int? {
+            scheduledActions.indices
+                .filter { !scheduledActions[$0].work.isCancelled && scheduledActions[$0].fireDate <= now }
+                .min { scheduledActions[$0].fireDate < scheduledActions[$1].fireDate }
+        }
+    }
+
+    private func makeLeftClickEvent(_ type: CGEventType, clickState: Int64 = 1) -> CGEvent {
         guard let source = CGEventSource(stateID: .hidSystemState),
               let event = CGEvent(
                 mouseEventSource: source,
@@ -516,112 +687,162 @@ struct ScrollSuppressorTests {
             fatalError("Failed to create left-click test event")
         }
 
-        event.setIntegerValueField(.mouseEventClickState, value: 1)
+        event.setIntegerValueField(.mouseEventClickState, value: clickState)
         return event
     }
 
-    @Test func physicalThreeFingerClickConvertsToMiddleClickPairWhenConfigured() {
+    @Test func physicalThreeFingerClickEmitsConfiguredSlotAndSuppressesPair() {
         let suppressor = ScrollSuppressor()
         suppressor.currentFingerCount = 3
+        let recorder = SlotRecorder()
+        suppressor.setPhysicalClickHandler { event in
+            recorder.slots.append(event.slot)
+        }
 
         switch suppressor.eventDisposition(
             for: .leftMouseDown,
             event: makeLeftClickEvent(.leftMouseDown),
-            isMiddleClickConfigured: true
+            configuredClickSlotsResolver: { _ in (.threeFingerClick, nil) }
         ) {
-        case .replace(let convertedDown):
-            #expect(convertedDown.type == .otherMouseDown)
-            #expect(convertedDown.getIntegerValueField(.mouseEventButtonNumber) == Int64(CGMouseButton.center.rawValue))
-            #expect(convertedDown.getIntegerValueField(.eventSourceUserData) == ScrollSuppressor.syntheticMiddleClickMarker)
-        case .passThrough, .suppress:
-            Issue.record("Expected left mouse down to convert to middle click")
+        case .suppress:
+            break
+        case .passThrough:
+            Issue.record("Expected left mouse down to be suppressed")
         }
+        #expect(recorder.slots == [.threeFingerClick])
 
         switch suppressor.eventDisposition(
             for: .leftMouseUp,
             event: makeLeftClickEvent(.leftMouseUp),
-            isMiddleClickConfigured: true
+            configuredClickSlotsResolver: { _ in (nil, nil) }
         ) {
-        case .replace(let convertedUp):
-            #expect(convertedUp.type == .otherMouseUp)
-            #expect(convertedUp.getIntegerValueField(.mouseEventButtonNumber) == Int64(CGMouseButton.center.rawValue))
-            #expect(convertedUp.getIntegerValueField(.eventSourceUserData) == ScrollSuppressor.syntheticMiddleClickMarker)
-        case .passThrough, .suppress:
-            Issue.record("Expected left mouse up to convert to middle click")
+        case .suppress:
+            break
+        case .passThrough:
+            Issue.record("Expected left mouse up to be suppressed")
         }
     }
 
-    @Test func physicalThreeFingerClickPassesThroughWhenMiddleClickIsDisabled() {
+    @Test func physicalThreeFingerClickWaitsForDoubleClickWindowBeforeSingleClick() {
+        let scheduler = ManualPhysicalClickScheduler()
+        let suppressor = ScrollSuppressor(clickScheduler: scheduler)
+        suppressor.currentFingerCount = 3
+        let recorder = SlotRecorder()
+        suppressor.setPhysicalClickHandler { event in
+            recorder.slots.append(event.slot)
+        }
+
+        switch suppressor.eventDisposition(
+            for: .leftMouseDown,
+            event: makeLeftClickEvent(.leftMouseDown),
+            configuredClickSlotsResolver: { _ in (.threeFingerClick, .threeFingerDoubleClick) }
+        ) {
+        case .suppress:
+            break
+        case .passThrough:
+            Issue.record("Expected left mouse down to be suppressed")
+        }
+        #expect(recorder.slots.isEmpty)
+
+        switch suppressor.eventDisposition(
+            for: .leftMouseUp,
+            event: makeLeftClickEvent(.leftMouseUp),
+            configuredClickSlotsResolver: { _ in (nil, nil) }
+        ) {
+        case .suppress:
+            break
+        case .passThrough:
+            Issue.record("Expected left mouse up to be suppressed")
+        }
+
+        scheduler.advance(by: NSEvent.doubleClickInterval + 0.01)
+        #expect(recorder.slots == [.threeFingerClick])
+    }
+
+    @Test func physicalFourFingerDoubleClickEmitsConfiguredDoubleClickSlot() {
+        let scheduler = ManualPhysicalClickScheduler()
+        let suppressor = ScrollSuppressor(clickScheduler: scheduler)
+        suppressor.currentFingerCount = 4
+        let recorder = SlotRecorder()
+        suppressor.setPhysicalClickHandler { event in
+            recorder.slots.append(event.slot)
+        }
+
+        switch suppressor.eventDisposition(
+            for: .leftMouseDown,
+            event: makeLeftClickEvent(.leftMouseDown),
+            configuredClickSlotsResolver: { _ in (.fourFingerClick, .fourFingerDoubleClick) }
+        ) {
+        case .suppress:
+            break
+        case .passThrough:
+            Issue.record("Expected first click to be suppressed")
+        }
+        switch suppressor.eventDisposition(
+            for: .leftMouseUp,
+            event: makeLeftClickEvent(.leftMouseUp),
+            configuredClickSlotsResolver: { _ in (nil, nil) }
+        ) {
+        case .suppress:
+            break
+        case .passThrough:
+            Issue.record("Expected first click up to be suppressed")
+        }
+
+        switch suppressor.eventDisposition(
+            for: .leftMouseDown,
+            event: makeLeftClickEvent(.leftMouseDown, clickState: 2),
+            configuredClickSlotsResolver: { _ in (.fourFingerClick, .fourFingerDoubleClick) }
+        ) {
+        case .suppress:
+            break
+        case .passThrough:
+            Issue.record("Expected second click to be suppressed")
+        }
+        #expect(recorder.slots == [.fourFingerDoubleClick])
+
+        switch suppressor.eventDisposition(
+            for: .leftMouseUp,
+            event: makeLeftClickEvent(.leftMouseUp),
+            configuredClickSlotsResolver: { _ in (nil, nil) }
+        ) {
+        case .suppress:
+            break
+        case .passThrough:
+            Issue.record("Expected second click up to be suppressed")
+        }
+
+        scheduler.advance(by: NSEvent.doubleClickInterval + 0.01)
+        #expect(recorder.slots == [.fourFingerDoubleClick])
+    }
+
+    @Test func unconfiguredPhysicalClickPassesThroughWithoutTouchTapDedupWindow() {
         let suppressor = ScrollSuppressor()
         suppressor.currentFingerCount = 3
 
         switch suppressor.eventDisposition(
             for: .leftMouseDown,
             event: makeLeftClickEvent(.leftMouseDown),
-            isMiddleClickConfigured: false
+            configuredClickSlotsResolver: { _ in (nil, nil) }
         ) {
         case .passThrough:
             break
-        case .suppress, .replace:
-            Issue.record("Expected left mouse down to pass through when middle click is disabled")
-        }
-    }
-
-    @Test func tapEmittedMiddleClickSuppressesDuplicatePhysicalClickPair() {
-        let suppressor = ScrollSuppressor()
-        suppressor.currentFingerCount = 3
-        #expect(suppressor.registerGestureMiddleClickIfNeeded(at: Date()) == true)
-
-        switch suppressor.eventDisposition(
-            for: .leftMouseDown,
-            event: makeLeftClickEvent(.leftMouseDown),
-            isMiddleClickConfigured: true
-        ) {
         case .suppress:
-            break
-        case .passThrough, .replace:
-            Issue.record("Expected duplicate physical click down to be suppressed")
+            Issue.record("Expected unconfigured click down to pass through")
         }
+
+        #expect(suppressor.shouldAllowTouchTap(fingerCount: 3, at: Date()) == true)
+        #expect(suppressor.shouldAllowTouchTap(fingerCount: 4, at: Date()) == true)
 
         switch suppressor.eventDisposition(
             for: .leftMouseUp,
             event: makeLeftClickEvent(.leftMouseUp),
-            isMiddleClickConfigured: true
+            configuredClickSlotsResolver: { _ in (nil, nil) }
         ) {
+        case .passThrough:
+            break
         case .suppress:
-            break
-        case .passThrough, .replace:
-            Issue.record("Expected duplicate physical click up to be suppressed")
-        }
-    }
-
-    @Test func convertedPhysicalClickBlocksDuplicateTapMiddleClick() {
-        let suppressor = ScrollSuppressor()
-        suppressor.currentFingerCount = 3
-
-        switch suppressor.eventDisposition(
-            for: .leftMouseDown,
-            event: makeLeftClickEvent(.leftMouseDown),
-            isMiddleClickConfigured: true
-        ) {
-        case .replace:
-            break
-        case .passThrough, .suppress:
-            Issue.record("Expected physical click down to convert to middle click")
-            return
-        }
-
-        #expect(suppressor.registerGestureMiddleClickIfNeeded(at: Date()) == false)
-
-        switch suppressor.eventDisposition(
-            for: .leftMouseUp,
-            event: makeLeftClickEvent(.leftMouseUp),
-            isMiddleClickConfigured: true
-        ) {
-        case .replace:
-            break
-        case .passThrough, .suppress:
-            Issue.record("Expected physical click up to convert to middle click")
+            Issue.record("Expected unconfigured click up to pass through")
         }
     }
 }

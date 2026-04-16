@@ -9,6 +9,8 @@ enum GestureSensitivitySetting {
     private static let baseSensitivityBoost: Double = 0.2
     private static let minimumSwipeThreshold: Float = 0.04
     private static let maximumSwipeThreshold: Float = 0.10
+    private static let minimumTapTravelThreshold: Float = 0.04
+    private static let maximumTapTravelThreshold: Float = 0.07
 
     static func clamp(_ value: Double) -> Double {
         min(max(value, minimumValue), maximumValue)
@@ -23,10 +25,20 @@ enum GestureSensitivitySetting {
         userDefaults.set(clamp(value), forKey: userDefaultsKey)
     }
 
+    static func clearStoredValue(userDefaults: UserDefaults = .standard) {
+        userDefaults.removeObject(forKey: userDefaultsKey)
+    }
+
     static func swipeThreshold(for sensitivity: Double) -> Float {
         let progress = Float(effectiveSensitivity(for: sensitivity))
         let range = maximumSwipeThreshold - minimumSwipeThreshold
         return maximumSwipeThreshold - (range * progress)
+    }
+
+    static func tapTravelThreshold(for sensitivity: Double) -> Float {
+        let progress = Float(effectiveSensitivity(for: sensitivity))
+        let range = maximumTapTravelThreshold - minimumTapTravelThreshold
+        return minimumTapTravelThreshold + (range * progress)
     }
 
     static func effectiveSensitivity(for sensitivity: Double) -> Double {
@@ -36,13 +48,20 @@ enum GestureSensitivitySetting {
     static func currentSwipeThreshold(userDefaults: UserDefaults = .standard) -> Float {
         swipeThreshold(for: storedValue(userDefaults: userDefaults))
     }
+
+    static func currentTapTravelThreshold(userDefaults: UserDefaults = .standard) -> Float {
+        tapTravelThreshold(for: storedValue(userDefaults: userDefaults))
+    }
 }
 
 enum GestureTapSettings {
-    static let maximumTravel: Float = 0.05
     // 500ms supports both light taps (~100ms) and physical clicks (~300-500ms).
     static let maximumDuration: TimeInterval = 0.5
     static let doubleTapWindow: TimeInterval = 0.3
+
+    static func currentMaximumTravel(userDefaults: UserDefaults = .standard) -> Float {
+        GestureSensitivitySetting.currentTapTravelThreshold(userDefaults: userDefaults)
+    }
 }
 
 // Classifies raw touch-frame sequences into swipe events using stable touch IDs,

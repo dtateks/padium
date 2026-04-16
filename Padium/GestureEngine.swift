@@ -294,12 +294,13 @@ final class GestureEngine {
         let recognitionTime = scheduler.now
         let duration = candidate.duration(at: recognitionTime)
         let travel = candidate.maximumTravel
+        let maximumTravel = GestureTapSettings.currentMaximumTravel()
         guard duration <= GestureTapSettings.maximumDuration else {
             PadiumLogger.gesture.debug("TAP-DIAG: REJECTED duration=\(duration) > max=\(GestureTapSettings.maximumDuration)")
             return
         }
-        guard travel <= GestureTapSettings.maximumTravel else {
-            PadiumLogger.gesture.debug("TAP-DIAG: REJECTED travel=\(travel) > max=\(GestureTapSettings.maximumTravel)")
+        guard travel <= maximumTravel else {
+            PadiumLogger.gesture.debug("TAP-DIAG: REJECTED travel=\(travel) > max=\(maximumTravel)")
             return
         }
         PadiumLogger.gesture.debug("TAP-DIAG: ACCEPTED tap fc=\(candidate.fingerCount) dur=\(duration) travel=\(travel)")
