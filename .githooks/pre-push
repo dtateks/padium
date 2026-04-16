@@ -15,6 +15,23 @@ ASSET_NAME="Padium-macos.zip"
 BUILD_SCRIPT="scripts/build-release.sh"
 HOOK_GUARD_VAR="PADIUM_SKIP_PRE_PUSH_RELEASE"
 
+# Cleanup state must live at script scope: when the trap fires from EXIT
+# the script's locals (declared inside main) are already out of scope and
+# `set -u` would turn the trap into "unbound variable" failures, aborting
+# git's push of refs/heads/main even after the asset upload succeeded.
+REF_FILE=""
+TEMP_DIR=""
+
+cleanup() {
+  if [[ -n "$REF_FILE" && -e "$REF_FILE" ]]; then
+    rm -f "$REF_FILE"
+  fi
+  if [[ -n "$TEMP_DIR" && -d "$TEMP_DIR" ]]; then
+    rm -rf "$TEMP_DIR"
+  fi
+}
+trap cleanup EXIT
+
 local_release_tag() {
   printf 'local-%s' "$(git rev-parse --short=7 HEAD)"
 }
@@ -85,17 +102,16 @@ publish_local_release() {
 
 main() {
   local remote_name="${1:-$REMOTE_NAME_DEFAULT}"
-  local ref_file tag temp_dir="" asset_path
+  local tag asset_path
 
   if [[ "${!HOOK_GUARD_VAR:-}" == "1" ]]; then
     exit 0
   fi
 
-  ref_file="$(mktemp)"
-  trap 'rm -f "$ref_file"; if [[ -n "$temp_dir" && -d "$temp_dir" ]]; then rm -rf "$temp_dir"; fi' EXIT
-  cat > "$ref_file"
+  REF_FILE="$(mktemp)"
+  cat > "$REF_FILE"
 
-  if ! ensure_release_branch_push "$ref_file"; then
+  if ! ensure_release_branch_push "$REF_FILE"; then
     exit 0
   fi
 
@@ -105,8 +121,8 @@ main() {
   ensure_clean_working_tree
   ensure_gh_ready
 
-  temp_dir="$(mktemp -d "/tmp/padium-pre-push.XXXXXX")"
-  asset_path="$(build_asset "$temp_dir")"
+  TEMP_DIR="$(mktemp -d "/tmp/padium-pre-push.XXXXXX")"
+  asset_path="$(build_asset "$TEMP_DIR")"
 
   tag="$(local_release_tag)"
   ensure_local_tag_points_at_head "$tag"
