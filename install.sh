@@ -4,8 +4,7 @@ set -euo pipefail
 APP_NAME="Padium.app"
 APP_BUNDLE_ID="com.padium"
 RELEASE_DOWNLOAD_BASE_URL="${PADIUM_DOWNLOAD_BASE_URL:-https://github.com/dtateks/padium/releases/latest/download}"
-RELEASE_ZIP_ARM64="Padium-darwin-arm64.zip"
-RELEASE_ZIP_X64="Padium-darwin-x64.zip"
+RELEASE_ZIP="Padium-macos.zip"
 INSTALL_DIR="/Applications"
 APP_EXECUTABLE_RELATIVE_PATH="Contents/MacOS/Padium"
 TEMP_DIR=""
@@ -18,42 +17,24 @@ cleanup() {
 
 trap cleanup EXIT
 
-detect_arch() {
-	case "$(uname -m)" in
-	arm64 | aarch64) printf '%s' "arm64" ;;
-	x86_64) printf '%s' "x64" ;;
-	*)
-		echo "Unsupported architecture: $(uname -m)" >&2
+require_macos() {
+	if [ "$(uname -s)" != "Darwin" ]; then
+		echo "This installer runs on macOS only." >&2
 		exit 1
-		;;
-	esac
+	fi
 }
 
 resolve_zip_url() {
-	local arch="$1"
-	local zip_name=""
-
 	if [ -n "${PADIUM_ZIP_URL:-}" ]; then
 		printf '%s' "$PADIUM_ZIP_URL"
 		return 0
 	fi
-
-	case "$arch" in
-	arm64) zip_name="$RELEASE_ZIP_ARM64" ;;
-	x64) zip_name="$RELEASE_ZIP_X64" ;;
-	*)
-		echo "Unsupported release architecture: $arch" >&2
-		exit 1
-		;;
-	esac
-
-	printf '%s' "$RELEASE_DOWNLOAD_BASE_URL/$zip_name"
+	printf '%s' "$RELEASE_DOWNLOAD_BASE_URL/$RELEASE_ZIP"
 }
 
 find_app_bundle() {
 	local search_root="$1"
 	local app_path
-
 	app_path=$(find "$search_root" -maxdepth 4 -name "$APP_NAME" -type d | while IFS= read -r path; do
 		printf '%s\n' "$path"
 		break
@@ -62,7 +43,6 @@ find_app_bundle() {
 		echo "Could not find $APP_NAME in extracted archive" >&2
 		exit 1
 	fi
-
 	printf '%s' "$app_path"
 }
 
@@ -70,7 +50,6 @@ verify_bundle_id() {
 	local bundle_path="$1"
 	local info_plist="$bundle_path/Contents/Info.plist"
 	local actual_bundle_id
-
 	actual_bundle_id=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$info_plist" 2>/dev/null || true)
 	if [ "$actual_bundle_id" != "$APP_BUNDLE_ID" ]; then
 		echo "Unexpected bundle id: ${actual_bundle_id:-<missing>}" >&2
@@ -129,15 +108,16 @@ main() {
 		exit 1
 	fi
 
-	local arch zip_url zip_path unpack_dir app_bundle
+	require_macos
+
+	local zip_url zip_path unpack_dir app_bundle
 
 	TEMP_DIR=$(mktemp -d "/tmp/padium-install.XXXXXX")
-	arch=$(detect_arch)
-	zip_url=$(resolve_zip_url "$arch")
+	zip_url=$(resolve_zip_url)
 	zip_path="$TEMP_DIR/padium.zip"
 	unpack_dir="$TEMP_DIR/unpacked"
 
-	echo "Downloading $APP_NAME for $arch..."
+	echo "Downloading $APP_NAME..."
 	curl -fL --progress-bar "$zip_url" -o "$zip_path"
 
 	mkdir -p "$unpack_dir"
