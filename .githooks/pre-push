@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# Fast-lane publisher: when pushing to main, build the native-arch release
-# zip locally and upload it to a local-<shortsha> GitHub release before the
-# push completes. CI then fills in the missing architecture.
+# Fast-lane publisher: when pushing to main, build the universal Padium.app zip
+# locally and upload it to a local-<shortsha> GitHub release before the push
+# completes. CI then detects the existing asset and skips its build step.
 #
 # Install with: bash scripts/install-hooks.sh
 #
@@ -11,19 +11,12 @@ set -euo pipefail
 
 RELEASE_BRANCH="main"
 REMOTE_NAME_DEFAULT="origin"
+ASSET_NAME="Padium-macos.zip"
 BUILD_SCRIPT="scripts/build-release.sh"
 HOOK_GUARD_VAR="PADIUM_SKIP_PRE_PUSH_RELEASE"
 
 local_release_tag() {
   printf 'local-%s' "$(git rev-parse --short=7 HEAD)"
-}
-
-asset_name_for_arch() {
-  case "$(uname -m)" in
-    arm64|aarch64) printf 'Padium-darwin-arm64.zip' ;;
-    x86_64) printf 'Padium-darwin-x64.zip' ;;
-    *) echo "Unsupported host architecture: $(uname -m)" >&2; exit 1 ;;
-  esac
 }
 
 ensure_release_branch_push() {
@@ -50,8 +43,7 @@ ensure_gh_ready() {
 }
 
 build_asset() {
-  local asset_name="$1"
-  bash "$BUILD_SCRIPT" "$asset_name"
+  bash "$BUILD_SCRIPT" "$ASSET_NAME"
 }
 
 ensure_local_tag_points_at_head() {
@@ -78,11 +70,10 @@ push_release_tag() {
 
 publish_local_release() {
   local tag="$1"
-  local asset_name="$2"
   if gh release view "$tag" >/dev/null 2>&1; then
-    gh release upload "$tag" "$asset_name" --clobber
+    gh release upload "$tag" "$ASSET_NAME" --clobber
   else
-    gh release create "$tag" "$asset_name" \
+    gh release create "$tag" "$ASSET_NAME" \
       --title "Padium $tag" \
       --generate-notes \
       --latest
@@ -91,7 +82,7 @@ publish_local_release() {
 
 main() {
   local remote_name="${1:-$REMOTE_NAME_DEFAULT}"
-  local ref_file tag asset_name
+  local ref_file tag
 
   if [[ "${!HOOK_GUARD_VAR:-}" == "1" ]]; then
     exit 0
@@ -111,14 +102,13 @@ main() {
   ensure_clean_working_tree
   ensure_gh_ready
 
-  asset_name="$(asset_name_for_arch)"
-  build_asset "$asset_name"
+  build_asset
 
   tag="$(local_release_tag)"
   ensure_local_tag_points_at_head "$tag"
   push_release_tag "$remote_name" "$tag"
 
-  if ! publish_local_release "$tag" "$asset_name"; then
+  if ! publish_local_release "$tag" "$ASSET_NAME"; then
     echo "WARN: pre-push release publication failed; CI will fall back to a full build." >&2
   fi
 }
