@@ -9,13 +9,17 @@ permissions:
   contents: write
 
 jobs:
-  prepare-release:
-    runs-on: ubuntu-latest
-    outputs:
-      release_tag: ${{ steps.plan.outputs.release_tag }}
-      build_matrix: ${{ steps.plan.outputs.build_matrix }}
+  release:
+    runs-on: macos-latest
+    env:
+      ASSET_NAME: Padium-macos.zip
     steps:
-      - name: Plan release tag and build matrix
+      - uses: actions/checkout@v4
+
+      - name: Select Xcode
+        run: sudo xcode-select -s /Applications/Xcode.app
+
+      - name: Resolve release tag and reuse state
         id: plan
         env:
           GH_TOKEN: ${{ github.token }}
@@ -24,12 +28,11 @@ jobs:
           set -euo pipefail
           short_sha="${GITHUB_SHA::7}"
           local_tag="local-${short_sha}"
-          local_asset="Padium-darwin-arm64.zip"
           reuse_local="false"
 
           if gh release view "$local_tag" >/dev/null 2>&1; then
             for attempt in $(seq 1 12); do
-              if gh release view "$local_tag" --json assets -q '.assets[].name' 2>/dev/null | grep -qx "$local_asset"; then
+              if gh release view "$local_tag" --json assets -q '.assets[].name' 2>/dev/null | grep -qx "$ASSET_NAME"; then
                 reuse_local="true"
                 break
               fi
@@ -39,32 +42,22 @@ jobs:
 
           if [[ "$reuse_local" == "true" ]]; then
             echo "release_tag=$local_tag" >> "$GITHUB_OUTPUT"
-            echo 'build_matrix={"include":[{"arch":"x64","runner":"macos-13","asset_name":"Padium-darwin-x64.zip"}]}' >> "$GITHUB_OUTPUT"
+            echo "skip_build=true" >> "$GITHUB_OUTPUT"
           else
             echo "release_tag=main-${GITHUB_RUN_NUMBER}-${short_sha}" >> "$GITHUB_OUTPUT"
-            echo 'build_matrix={"include":[{"arch":"arm64","runner":"macos-latest","asset_name":"Padium-darwin-arm64.zip"},{"arch":"x64","runner":"macos-13","asset_name":"Padium-darwin-x64.zip"}]}' >> "$GITHUB_OUTPUT"
+            echo "skip_build=false" >> "$GITHUB_OUTPUT"
           fi
 
-  build-macos:
-    needs: prepare-release
-    strategy:
-      fail-fast: false
-      matrix: ${{ fromJson(needs.prepare-release.outputs.build_matrix) }}
-    runs-on: ${{ matrix.runner }}
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Select Xcode
-        run: sudo xcode-select -s /Applications/Xcode.app
-
-      - name: Build and package Padium.app
-        run: bash scripts/build-release.sh "${{ matrix.asset_name }}"
+      - name: Build universal Padium.app and zip
+        if: steps.plan.outputs.skip_build == 'false'
+        run: bash scripts/build-release.sh "$ASSET_NAME"
 
       - name: Publish release asset
+        if: steps.plan.outputs.skip_build == 'false'
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ needs.prepare-release.outputs.release_tag }}
+          tag_name: ${{ steps.plan.outputs.release_tag }}
           target_commitish: ${{ github.sha }}
           prerelease: false
           make_latest: true
-          files: ${{ matrix.asset_name }}
+          files: ${{ env.ASSET_NAME }}
