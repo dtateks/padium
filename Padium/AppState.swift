@@ -92,7 +92,6 @@ final class AppState {
     private let shortcutEmitter: any ShortcutEmitting
     private let middleClickEmitter: any MiddleClickEmitting
     private let scrollSuppressor: any PhysicalClickCoordinating
-    private let keyboardActivityMonitor: any KeyboardActivityMonitoring
     private var runtimeTask: Task<Void, Never>?
     private var observedConfiguration: StoredConfiguration
     private var defaultsObserver: NSObjectProtocol?
@@ -104,8 +103,7 @@ final class AppState {
         gestureEngine: (any GestureRuntimeControlling)? = nil,
         shortcutEmitter: (any ShortcutEmitting)? = nil,
         middleClickEmitter: (any MiddleClickEmitting)? = nil,
-        scrollSuppressor: (any PhysicalClickCoordinating)? = nil,
-        keyboardActivityMonitor: (any KeyboardActivityMonitoring)? = nil
+        scrollSuppressor: (any PhysicalClickCoordinating)? = nil
     ) {
         self.coordinator = PermissionCoordinator(checker: permissionChecker)
 
@@ -126,16 +124,12 @@ final class AppState {
         )
         self.defaultsObserver = nil
 
-        let resolvedKeyboardActivityMonitor = keyboardActivityMonitor ?? KeyboardActivityMonitor.shared
-        self.keyboardActivityMonitor = resolvedKeyboardActivityMonitor
-
         if let gestureEngine {
             self.gestureEngine = gestureEngine
         } else {
             self.gestureEngine = GestureEngine(
                 source: OMSGestureSource(),
-                supportedSlots: Set(supportedGestureSlots),
-                keyboardActivity: resolvedKeyboardActivityMonitor
+                supportedSlots: Set(supportedGestureSlots)
             )
         }
 
@@ -181,6 +175,10 @@ final class AppState {
 
     func openTrackpadSettings() {
         preemptionController.openTrackpadSettings()
+    }
+
+    func setAppInteractionActive(_ isActive: Bool) {
+        scrollSuppressor.setAppInteractionActive(isActive)
     }
 
     func systemGestureSettings() -> [SystemGestureSetting] {
@@ -235,7 +233,6 @@ final class AppState {
         }
         applySystemGestureSuppression()
         scrollSuppressor.start()
-        keyboardActivityMonitor.start()
 
         guard gestureEngine.start() else {
             if let startError = gestureEngine.lastStartError {
@@ -243,7 +240,6 @@ final class AppState {
             }
             scrollSuppressor.setPhysicalClickHandler(nil)
             scrollSuppressor.stop()
-            keyboardActivityMonitor.stop()
             systemGestureManager.restore()
             return
         }
@@ -262,7 +258,6 @@ final class AppState {
         runtimeTask = nil
         scrollSuppressor.setPhysicalClickHandler(nil)
         scrollSuppressor.stop()
-        keyboardActivityMonitor.stop()
         systemGestureManager.restore()
     }
 

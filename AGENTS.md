@@ -31,7 +31,6 @@ Bundle ID: `com.padium`, version 0.1.0. LSUIElement=true (no Dock icon).
 - `SystemGestureManager` also auto-suppresses Smart Zoom via `TrackpadTwoFingerDoubleTapGesture` when the configured 2-finger double-tap slot is in use
 - `SystemGestureManager` only disables Dock gesture keys when all enabled vertical system gestures are being suppressed; partial vertical suppression leaves the other finger-count variant enabled
 - `ScrollSuppressor` uses a CGEventTap to consume scroll wheel events while 3+ fingers are active on the trackpad, preventing 2-finger scroll from firing during 3-finger gestures; it also routes configured physical 3/4-finger click and double-click gestures through `AppState` and suppresses same-sequence touch taps so physical clicks take precedence
-- `KeyboardActivityMonitor` observes global+local `NSEvent.keyDown` passively (no event consumption, no extra permission beyond the Accessibility grant Padium already holds) and exposes a `wasKeyPressedRecently(within:)` signal. `GestureEngine.handleLift` rejects touch taps within a 200 ms post-keystroke window — swipes are unaffected. This is Padium's palm-during-typing defense: device-agnostic, size-invariant
 
 ## Test
 - `xcodebuild -project Padium.xcodeproj -scheme Padium test`
@@ -81,8 +80,8 @@ Physical click path: `ScrollSuppressor` CGEventTap detects configured 3/4-finger
 ## Coding Conventions
 - `@MainActor` on all UI-bound and state classes
 - Views are thin: render state only, no side-effect orchestration
-- Protocols for DI boundaries: `GestureSource`, `GestureRuntimeControlling`, `ShortcutEmitting`, `MiddleClickEmitting`, `PreemptionControlling`, `SystemGestureManaging`, `PhysicalClickCoordinating`, `MultitouchStateSink`, `PermissionChecking`, `KeyboardActivitySensing`, `KeyboardActivityMonitoring`
-- `AppState` takes `scrollSuppressor: (any PhysicalClickCoordinating)? = nil` and `keyboardActivityMonitor: (any KeyboardActivityMonitoring)? = nil`; `GestureEngine` takes `multitouchSink: (any MultitouchStateSink)? = nil` and `keyboardActivity: (any KeyboardActivitySensing)? = nil`. Defaults point at `ScrollSuppressor.shared` and `KeyboardActivityMonitor.shared` so production keeps the singletons while tests can isolate the click/touch-state/keyboard surfaces
+- Protocols for DI boundaries: `GestureSource`, `GestureRuntimeControlling`, `ShortcutEmitting`, `MiddleClickEmitting`, `PreemptionControlling`, `SystemGestureManaging`, `PhysicalClickCoordinating`, `MultitouchStateSink`, `PermissionChecking`
+- `AppState` takes `scrollSuppressor: (any PhysicalClickCoordinating)? = nil`; `GestureEngine` takes `multitouchSink: (any MultitouchStateSink)? = nil`. Defaults point at `ScrollSuppressor.shared`
 - `@discardableResult` on `start()`/`emitConfiguredShortcut()` methods
 - Logging via `PadiumLogger` (OSLog): categories `gesture`, `shortcut`, `permission`
 - Classifier thresholds are empirically derived — do NOT change without new evidence; swipe sensitivity and tap/double-tap thresholds are intentionally separate
@@ -102,7 +101,6 @@ Physical click path: `ScrollSuppressor` CGEventTap detects configured 3/4-finger
 | Gesture detection pipeline | `Padium/GestureEngine.swift` → `GestureClassifier.swift` |
 | Multitouch hardware bridge | `Padium/OMSGestureSource.swift` |
 | Shortcut emission | `Padium/ShortcutEmitter.swift` |
-| Palm-during-typing defense | `Padium/KeyboardActivityMonitor.swift` |
 | Permission logic | `Padium/PermissionCoordinator.swift` |
 | System gesture policy | `Padium/PreemptionController.swift` |
 | Slot↔shortcut mapping | `Padium/ShortcutRegistry.swift` |

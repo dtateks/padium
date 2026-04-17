@@ -162,6 +162,38 @@ struct GestureClassifierTests {
         #expect(c.classifyIncremental(firstFrame: first, currentFrame: last, peakFingerCount: 3) == nil)
     }
 
+    @Test func rejectsThreeFingerSwipeWhenOneContactIsNearlyStationary() {
+        let c = makeClassifier()
+        let first = [
+            pt(id: 1, x: 0.20, y: 0.50),
+            pt(id: 2, x: 0.40, y: 0.50),
+            pt(id: 3, x: 0.52, y: 0.50)
+        ]
+        let last = [
+            pt(id: 1, x: 0.50, y: 0.50),
+            pt(id: 2, x: 0.70, y: 0.50),
+            pt(id: 3, x: 0.54, y: 0.50)
+        ]
+
+        #expect(c.classifyIncremental(firstFrame: first, currentFrame: last, peakFingerCount: 3) == nil)
+    }
+
+    @Test func acceptsThreeFingerSwipeWhenOneFingerLagsButStillTracksTheGesture() {
+        let c = makeClassifier()
+        let first = [
+            pt(id: 1, x: 0.20, y: 0.50),
+            pt(id: 2, x: 0.40, y: 0.50),
+            pt(id: 3, x: 0.60, y: 0.50)
+        ]
+        let last = [
+            pt(id: 1, x: 0.40, y: 0.50),
+            pt(id: 2, x: 0.55, y: 0.50),
+            pt(id: 3, x: 0.71, y: 0.50)
+        ]
+
+        #expect(c.classifyIncremental(firstFrame: first, currentFrame: last, peakFingerCount: 3)?.slot == .threeFingerSwipeRight)
+    }
+
     // MARK: - 3 finger directions
 
     @Test func threeFingerRight() {

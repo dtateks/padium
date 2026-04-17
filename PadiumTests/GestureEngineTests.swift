@@ -161,38 +161,14 @@ struct GestureEngineTests {
     private func makeEngine(
         source: StubGestureSource,
         supportedSlots: Set<GestureSlot> = Set(GestureSlot.allCases),
-        scheduler: (any GestureScheduling)? = nil,
-        keyboardActivity: (any KeyboardActivitySensing)? = nil
+        scheduler: (any GestureScheduling)? = nil
     ) -> GestureEngine {
         GestureEngine(
             source: source,
             classifier: GestureClassifier(swipeThreshold: testSwipeThreshold),
             supportedSlots: supportedSlots,
-            scheduler: scheduler,
-            keyboardActivity: keyboardActivity
+            scheduler: scheduler
         )
-    }
-
-    final class StubKeyboardActivity: KeyboardActivitySensing, @unchecked Sendable {
-        private var _lock = os_unfair_lock()
-        private var _isRecentlyPressed: Bool = false
-
-        var isRecentlyPressed: Bool {
-            get {
-                os_unfair_lock_lock(&_lock)
-                defer { os_unfair_lock_unlock(&_lock) }
-                return _isRecentlyPressed
-            }
-            set {
-                os_unfair_lock_lock(&_lock)
-                _isRecentlyPressed = newValue
-                os_unfair_lock_unlock(&_lock)
-            }
-        }
-
-        func wasKeyPressedRecently(within interval: TimeInterval) -> Bool {
-            isRecentlyPressed
-        }
     }
 
     // Deterministic collection: yields frames + lift, stops the engine, then
@@ -1120,96 +1096,55 @@ struct GestureEngineTests {
 
     // MARK: - Palm rejection
 
-    @Test func typingRecentlySuppressesTwoFingerDoubleTap() async {
+    @Test func nearStationaryThirdContactDoesNotTriggerThreeFingerSwipe() async {
         let source = StubGestureSource()
         let scheduler = ManualGestureScheduler()
-        let keyboard = StubKeyboardActivity()
-        keyboard.isRecentlyPressed = true
-
-        let engine = makeEngine(
-            source: source,
-            supportedSlots: [.twoFingerDoubleTap],
-            scheduler: scheduler,
-            keyboardActivity: keyboard
-        )
-        engine.start()
-
-        let collector = EventCollector()
-        let collectionTask = collector.collect(from: engine.events)
-
-        await performTap(
-            source: source,
-            scheduler: scheduler,
-            frames: makeTapFrames(fingerCount: 2)
-        )
-        scheduler.advance(by: 0.10)
-        await performTap(
-            source: source,
-            scheduler: scheduler,
-            frames: makeTapFrames(fingerCount: 2)
-        )
-
-        #expect(collector.events.isEmpty)
-
-        engine.stop()
-        await collectionTask.value
-    }
-
-    @Test func typingIdleDoesNotBlockTwoFingerDoubleTap() async {
-        let source = StubGestureSource()
-        let scheduler = ManualGestureScheduler()
-        let keyboard = StubKeyboardActivity()
-        keyboard.isRecentlyPressed = false
-
-        let engine = makeEngine(
-            source: source,
-            supportedSlots: [.twoFingerDoubleTap],
-            scheduler: scheduler,
-            keyboardActivity: keyboard
-        )
-        engine.start()
-
-        let collector = EventCollector()
-        let collectionTask = collector.collect(from: engine.events)
-
-        await performTap(
-            source: source,
-            scheduler: scheduler,
-            frames: makeTapFrames(fingerCount: 2)
-        )
-        scheduler.advance(by: 0.10)
-        await performTap(
-            source: source,
-            scheduler: scheduler,
-            frames: makeTapFrames(fingerCount: 2)
-        )
-
-        #expect(collector.events.map(\.slot) == [.twoFingerDoubleTap])
-
-        engine.stop()
-        await collectionTask.value
-    }
-
-    @Test func typingWindowDoesNotSuppressSwipe() async {
-        let source = StubGestureSource()
-        let scheduler = ManualGestureScheduler()
-        let keyboard = StubKeyboardActivity()
-        keyboard.isRecentlyPressed = true
-
-        let engine = makeEngine(
-            source: source,
-            scheduler: scheduler,
-            keyboardActivity: keyboard
-        )
+        let engine = makeEngine(source: source, scheduler: scheduler)
         engine.start()
         let eventsStream = engine.events
 
-        let frames = makeSwipeFrames(fingerCount: 3, startX: 0.1, startY: 0.5, endX: 0.9, endY: 0.5)
-        let received = await driveAndCollect(engine: engine, source: source,
-                                             scheduler: scheduler,
-                                             frames: frames, eventsStream: eventsStream)
+        let frames = [
+            [
+                TouchPoint(identifier: 1, normalizedX: 0.20, normalizedY: 0.50, pressure: 0.3, state: .touching, total: 0.15, majorAxis: 12.0),
+                TouchPoint(identifier: 2, normalizedX: 0.40, normalizedY: 0.50, pressure: 0.3, state: .touching, total: 0.15, majorAxis: 12.0),
+                TouchPoint(identifier: 3, normalizedX: 0.52, normalizedY: 0.50, pressure: 0.3, state: .touching, total: 0.15, majorAxis: 12.0)
+            ],
+            [
+                TouchPoint(identifier: 1, normalizedX: 0.26, normalizedY: 0.50, pressure: 0.3, state: .touching, total: 0.15, majorAxis: 12.0),
+                TouchPoint(identifier: 2, normalizedX: 0.46, normalizedY: 0.50, pressure: 0.3, state: .touching, total: 0.15, majorAxis: 12.0),
+                TouchPoint(identifier: 3, normalizedX: 0.524, normalizedY: 0.50, pressure: 0.3, state: .touching, total: 0.15, majorAxis: 12.0)
+            ],
+            [
+                TouchPoint(identifier: 1, normalizedX: 0.32, normalizedY: 0.50, pressure: 0.3, state: .touching, total: 0.15, majorAxis: 12.0),
+                TouchPoint(identifier: 2, normalizedX: 0.52, normalizedY: 0.50, pressure: 0.3, state: .touching, total: 0.15, majorAxis: 12.0),
+                TouchPoint(identifier: 3, normalizedX: 0.528, normalizedY: 0.50, pressure: 0.3, state: .touching, total: 0.15, majorAxis: 12.0)
+            ],
+            [
+                TouchPoint(identifier: 1, normalizedX: 0.38, normalizedY: 0.50, pressure: 0.3, state: .touching, total: 0.15, majorAxis: 12.0),
+                TouchPoint(identifier: 2, normalizedX: 0.58, normalizedY: 0.50, pressure: 0.3, state: .touching, total: 0.15, majorAxis: 12.0),
+                TouchPoint(identifier: 3, normalizedX: 0.532, normalizedY: 0.50, pressure: 0.3, state: .touching, total: 0.15, majorAxis: 12.0)
+            ],
+            [
+                TouchPoint(identifier: 1, normalizedX: 0.44, normalizedY: 0.50, pressure: 0.3, state: .touching, total: 0.15, majorAxis: 12.0),
+                TouchPoint(identifier: 2, normalizedX: 0.64, normalizedY: 0.50, pressure: 0.3, state: .touching, total: 0.15, majorAxis: 12.0),
+                TouchPoint(identifier: 3, normalizedX: 0.536, normalizedY: 0.50, pressure: 0.3, state: .touching, total: 0.15, majorAxis: 12.0)
+            ],
+            [
+                TouchPoint(identifier: 1, normalizedX: 0.50, normalizedY: 0.50, pressure: 0.3, state: .touching, total: 0.15, majorAxis: 12.0),
+                TouchPoint(identifier: 2, normalizedX: 0.70, normalizedY: 0.50, pressure: 0.3, state: .touching, total: 0.15, majorAxis: 12.0),
+                TouchPoint(identifier: 3, normalizedX: 0.54, normalizedY: 0.50, pressure: 0.3, state: .touching, total: 0.15, majorAxis: 12.0)
+            ]
+        ]
 
-        #expect(received.map(\.slot) == [.threeFingerSwipeRight])
+        let received = await driveAndCollect(
+            engine: engine,
+            source: source,
+            scheduler: scheduler,
+            frames: frames,
+            eventsStream: eventsStream
+        )
+
+        #expect(received.isEmpty)
     }
 
     @Test func palmRestAtOppositeCornersDoesNotEmitTwoFingerDoubleTap() async {

@@ -93,6 +93,11 @@ struct GestureClassifier: Sendable {
     // A finger may jitter slightly against the committed direction without invalidating the swipe.
     private static let perFingerDirectionTolerance: Float = 0.015
 
+    // All contacts in a real swipe should contribute meaningful motion along the
+    // committed axis. This rejects a stray palm/resting contact that only jitters
+    // while the actual fingers move.
+    private static let perFingerMotionConsensusRatio: Float = 0.35
+
     // Contacts with total capacitance below this value are noise.
     private static let noiseCapacitanceThreshold: Float = 0.03
 
@@ -118,6 +123,13 @@ struct GestureClassifier: Sendable {
     private static let handSpreadThresholds: [Int: Float] = [
         2: 0.70,
         3: 1.00
+    ]
+
+    // Three-finger swipes should keep roughly the same hand shape over the commit
+    // window. A stationary palm plus two moving fingers sharply changes pairwise
+    // spacing even when the frame still fits inside the coarse one-hand spread gate.
+    private static let swipeHandShapeChangeTolerance: [Int: Float] = [
+        3: 0.25
     ]
 
     // Swipes are only recognized for these finger counts; lower counts are
@@ -185,6 +197,8 @@ struct GestureClassifier: Sendable {
         guard displacements.allSatisfy({ displacementSupportsCommittedDirection($0, axis: dominantAxis, dominantDelta: dominantDelta) }) else {
             return nil
         }
+        guard dominantMotionIsConsistent(displacements, axis: dominantAxis) else { return nil }
+        guard contactSetMaintainsSwipeShape(firstContacts: firstContacts, currentContacts: currentContacts) else { return nil }
 
         guard let slot = swipeSlot(axis: dominantAxis, dominantDelta: dominantDelta, fingerCount: peakFingerCount) else {
             return nil
@@ -296,6 +310,60 @@ struct GestureClassifier: Sendable {
         let movedEnough = abs(dominantComponent) >= Self.perFingerDirectionTolerance
 
         return sameDirection && movedEnough
+    }
+
+    private func dominantMotionIsConsistent(
+        _ displacements: [(dx: Float, dy: Float)],
+        axis: SwipeAxis
+    ) -> Bool {
+        let dominantComponents = displacements
+            .map { abs(axis == .horizontal ? $0.dx : $0.dy) }
+            .sorted()
+        guard let medianTravel = Self.median(of: dominantComponents) else { return false }
+        let minimumExpectedTravel = max(
+            Self.perFingerDirectionTolerance,
+            medianTravel * Self.perFingerMotionConsensusRatio
+        )
+
+        return dominantComponents.allSatisfy { $0 >= minimumExpectedTravel }
+    }
+
+    private func contactSetMaintainsSwipeShape(
+        firstContacts: [Int: TouchPoint],
+        currentContacts: [Int: TouchPoint]
+    ) -> Bool {
+        guard let tolerance = Self.swipeHandShapeChangeTolerance[firstContacts.count] else { return true }
+        let identifiers = firstContacts.keys.sorted()
+
+        for firstIndex in 0..<identifiers.count {
+            for secondIndex in (firstIndex + 1)..<identifiers.count {
+                guard
+                    let startA = firstContacts[identifiers[firstIndex]],
+                    let startB = firstContacts[identifiers[secondIndex]],
+                    let currentA = currentContacts[identifiers[firstIndex]],
+                    let currentB = currentContacts[identifiers[secondIndex]]
+                else {
+                    return false
+                }
+
+                let startDistance = Self.aspectCorrectedDistance(from: startA, to: startB)
+                let currentDistance = Self.aspectCorrectedDistance(from: currentA, to: currentB)
+                if abs(currentDistance - startDistance) > tolerance {
+                    return false
+                }
+            }
+        }
+
+        return true
+    }
+
+    private static func median(of sortedValues: [Float]) -> Float? {
+        guard !sortedValues.isEmpty else { return nil }
+        let middleIndex = sortedValues.count / 2
+        if sortedValues.count.isMultiple(of: 2) {
+            return (sortedValues[middleIndex - 1] + sortedValues[middleIndex]) / 2
+        }
+        return sortedValues[middleIndex]
     }
 
     private func swipeSlot(axis: SwipeAxis, dominantDelta: Float, fingerCount: Int) -> GestureSlot? {
