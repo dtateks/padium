@@ -79,8 +79,7 @@ struct SettingsContentView: View {
             .padding(.vertical, 14)
             .background(Color(nsColor: .controlBackgroundColor).opacity(0.5))
         }
-        .frame(width: 540, height: 420)
-        .fixedSize()
+        .frame(width: 740, height: 480)
         .onAppear {
             appState.setAppInteractionActive(true)
             appState.refreshPermissions()
@@ -151,7 +150,7 @@ struct SettingsContentView: View {
                 }
                 Spacer()
             }
-            .padding(20)
+            .padding(24)
             .frame(maxWidth: .infinity, alignment: .leading)
             
             Divider()
@@ -183,7 +182,7 @@ struct SettingsContentView: View {
                 }
                 Spacer()
             }
-            .padding(20)
+            .padding(24)
             .frame(maxWidth: .infinity, alignment: .leading)
         }
         .background(Color(nsColor: .windowBackgroundColor))
@@ -216,11 +215,11 @@ struct CompactGestureRow: View {
     let appState: AppState
     
     var body: some View {
-        HStack(spacing: 8) {
+        HStack(spacing: 12) {
             Text(slot.displayName.uppercased())
                 .font(.system(size: 11, weight: .medium, design: .monospaced))
                 .foregroundStyle(.primary)
-                .frame(width: 100, alignment: .leading)
+                .frame(width: 90, alignment: .leading)
             
             GestureRowView(
                 slot: slot,
