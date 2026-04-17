@@ -7,12 +7,13 @@ struct SettingsContentView: View {
         VStack(spacing: 0) {
             // Header
             HStack(alignment: .center) {
-                VStack(alignment: .leading, spacing: 2) {
+                VStack(alignment: .leading, spacing: 4) {
                     Text("PADIUM")
-                        .font(.system(size: 20, weight: .heavy, design: .monospaced))
-                        .tracking(2)
+                        .font(.system(size: 24, weight: .heavy, design: .monospaced))
+                        .tracking(4)
+                        .padding(.top, 8)
                     Text("TRACKPAD GESTURES TO SHORTCUTS")
-                        .font(.system(size: 9, weight: .bold, design: .monospaced))
+                        .font(.system(size: 10, weight: .bold, design: .monospaced))
                         .foregroundStyle(.tertiary)
                 }
                 
@@ -27,7 +28,8 @@ struct SettingsContentView: View {
                 }
             }
             .padding(.horizontal, 24)
-            .padding(.vertical, 20)
+            .padding(.top, 16)
+            .padding(.bottom, 20)
             .background(Color(nsColor: .controlBackgroundColor).opacity(0.5))
 
             Divider()
@@ -79,7 +81,7 @@ struct SettingsContentView: View {
             .padding(.vertical, 14)
             .background(Color(nsColor: .controlBackgroundColor).opacity(0.5))
         }
-        .frame(width: 740, height: 480)
+        .frame(width: 740, height: 500)
         .onAppear {
             appState.setAppInteractionActive(true)
             appState.refreshPermissions()
