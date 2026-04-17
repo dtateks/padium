@@ -154,8 +154,12 @@ enum GestureActionKind: String, CaseIterable, Sendable {
 enum GestureActionStore {
     private static let prefix = "gesture.action."
 
+    static func userDefaultsKey(for slot: GestureSlot) -> String {
+        prefix + slot.rawValue
+    }
+
     static func actionKind(for slot: GestureSlot) -> GestureActionKind {
-        guard let raw = UserDefaults.standard.string(forKey: prefix + slot.rawValue),
+        guard let raw = UserDefaults.standard.string(forKey: userDefaultsKey(for: slot)),
               let kind = GestureActionKind(rawValue: raw) else {
             return .shortcut
         }
@@ -163,10 +167,11 @@ enum GestureActionStore {
     }
 
     static func setActionKind(_ kind: GestureActionKind, for slot: GestureSlot) {
+        let key = userDefaultsKey(for: slot)
         if kind == .shortcut {
-            UserDefaults.standard.removeObject(forKey: prefix + slot.rawValue)
+            UserDefaults.standard.removeObject(forKey: key)
         } else {
-            UserDefaults.standard.set(kind.rawValue, forKey: prefix + slot.rawValue)
+            UserDefaults.standard.set(kind.rawValue, forKey: key)
         }
     }
 }

@@ -131,16 +131,24 @@ final class SystemGestureManager {
         let task = Process()
         task.executableURL = URL(fileURLWithPath: "/usr/bin/defaults")
         task.arguments = ["write", domain, key] + value.split(separator: " ").map(String.init)
-        try? task.run()
-        task.waitUntilExit()
+        do {
+            try task.run()
+            task.waitUntilExit()
+        } catch {
+            PadiumLogger.gesture.error("defaults write failed domain=\(domain, privacy: .public) key=\(key, privacy: .public): \(String(describing: error), privacy: .public)")
+        }
     }
 
     private func restartDock() {
         let task = Process()
         task.executableURL = URL(fileURLWithPath: "/usr/bin/killall")
         task.arguments = ["Dock"]
-        try? task.run()
-        task.waitUntilExit()
+        do {
+            try task.run()
+            task.waitUntilExit()
+        } catch {
+            PadiumLogger.gesture.error("killall Dock failed: \(String(describing: error), privacy: .public)")
+        }
     }
 
     static func disabledPreferenceKeys(

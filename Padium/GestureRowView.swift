@@ -6,13 +6,33 @@ struct GestureRowView: View {
     var isConflicting: Bool = false
     var onShortcutChange: () -> Void = {}
 
-    @State private var actionKind: GestureActionKind
+    // @AppStorage observes UserDefaults, so the picker reflects external
+    // changes (e.g. other Padium features writing the same key) without
+    // a stale snapshot from view init.
+    @AppStorage private var storedActionKind: String
 
     init(slot: GestureSlot, isConflicting: Bool = false, onShortcutChange: @escaping () -> Void = {}) {
         self.slot = slot
         self.isConflicting = isConflicting
         self.onShortcutChange = onShortcutChange
-        _actionKind = State(initialValue: GestureActionStore.actionKind(for: slot))
+        _storedActionKind = AppStorage(
+            wrappedValue: GestureActionKind.shortcut.rawValue,
+            GestureActionStore.userDefaultsKey(for: slot)
+        )
+    }
+
+    private var actionKind: GestureActionKind {
+        GestureActionKind(rawValue: storedActionKind) ?? .shortcut
+    }
+
+    private var actionKindBinding: Binding<GestureActionKind> {
+        Binding(
+            get: { actionKind },
+            set: { newValue in
+                GestureActionStore.setActionKind(newValue, for: slot)
+                onShortcutChange()
+            }
+        )
     }
 
     var body: some View {
@@ -44,16 +64,12 @@ struct GestureRowView: View {
     private var tapRow: some View {
         LabeledContent {
             HStack(spacing: 6) {
-                Picker("", selection: $actionKind) {
+                Picker("", selection: actionKindBinding) {
                     Text("Shortcut").tag(GestureActionKind.shortcut)
                     Text("Middle Click").tag(GestureActionKind.middleClick)
                 }
                 .pickerStyle(.menu)
                 .fixedSize()
-                .onChange(of: actionKind) { _, newValue in
-                    GestureActionStore.setActionKind(newValue, for: slot)
-                    onShortcutChange()
-                }
 
                 if actionKind == .shortcut {
                     KeyboardShortcuts.Recorder(for: ShortcutRegistry.name(for: slot)) { _ in
