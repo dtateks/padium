@@ -24,6 +24,7 @@
 		AA010101010F /* PreemptionController.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA020101010F /* PreemptionController.swift */; };
 		AA0101010111 /* SystemGestureManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0201010112 /* SystemGestureManager.swift */; };
 		AA0101010113 /* ScrollSuppressor.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0201010114 /* ScrollSuppressor.swift */; };
+		AA0101010116 /* KeyboardActivityMonitor.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0201010116 /* KeyboardActivityMonitor.swift */; };
 		AA0101010115 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = AA0201010115 /* Assets.xcassets */; };
 		AA0101010110 /* Logger.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0201010110 /* Logger.swift */; };
 		AA0101020201 /* GestureClassifierTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0301020201 /* GestureClassifierTests.swift */; };
@@ -54,6 +55,7 @@
 		AA020101010F /* PreemptionController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PreemptionController.swift; sourceTree = "<group>"; };
 		AA0201010112 /* SystemGestureManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SystemGestureManager.swift; sourceTree = "<group>"; };
 		AA0201010114 /* ScrollSuppressor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScrollSuppressor.swift; sourceTree = "<group>"; };
+		AA0201010116 /* KeyboardActivityMonitor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeyboardActivityMonitor.swift; sourceTree = "<group>"; };
 		AA0201010115 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		AA0201010110 /* Logger.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Logger.swift; sourceTree = "<group>"; };
 		AA0201010111 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
@@ -118,6 +120,7 @@
 				AA020101010F /* PreemptionController.swift */,
 				AA0201010112 /* SystemGestureManager.swift */,
 				AA0201010114 /* ScrollSuppressor.swift */,
+				AA0201010116 /* KeyboardActivityMonitor.swift */,
 				AA0201010110 /* Logger.swift */,
 				AA0201010115 /* Assets.xcassets */,
 				AA0201010111 /* Info.plist */,
@@ -265,6 +268,7 @@
 				AA010101010F /* PreemptionController.swift in Sources */,
 				AA0101010111 /* SystemGestureManager.swift in Sources */,
 				AA0101010113 /* ScrollSuppressor.swift in Sources */,
+				AA0101010116 /* KeyboardActivityMonitor.swift in Sources */,
 				AA0101010110 /* Logger.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;

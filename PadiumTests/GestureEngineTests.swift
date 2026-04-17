@@ -1,6 +1,7 @@
 import Testing
 @testable import Padium
 import Foundation
+import os
 
 // Tests for GestureEngine — lifecycle, policy filtering, and event pipeline.
 @MainActor
@@ -160,14 +161,38 @@ struct GestureEngineTests {
     private func makeEngine(
         source: StubGestureSource,
         supportedSlots: Set<GestureSlot> = Set(GestureSlot.allCases),
-        scheduler: (any GestureScheduling)? = nil
+        scheduler: (any GestureScheduling)? = nil,
+        keyboardActivity: (any KeyboardActivitySensing)? = nil
     ) -> GestureEngine {
         GestureEngine(
             source: source,
             classifier: GestureClassifier(swipeThreshold: testSwipeThreshold),
             supportedSlots: supportedSlots,
-            scheduler: scheduler
+            scheduler: scheduler,
+            keyboardActivity: keyboardActivity
         )
+    }
+
+    final class StubKeyboardActivity: KeyboardActivitySensing, @unchecked Sendable {
+        private var _lock = os_unfair_lock()
+        private var _isRecentlyPressed: Bool = false
+
+        var isRecentlyPressed: Bool {
+            get {
+                os_unfair_lock_lock(&_lock)
+                defer { os_unfair_lock_unlock(&_lock) }
+                return _isRecentlyPressed
+            }
+            set {
+                os_unfair_lock_lock(&_lock)
+                _isRecentlyPressed = newValue
+                os_unfair_lock_unlock(&_lock)
+            }
+        }
+
+        func wasKeyPressedRecently(within interval: TimeInterval) -> Bool {
+            isRecentlyPressed
+        }
     }
 
     // Deterministic collection: yields frames + lift, stops the engine, then
@@ -1092,6 +1117,134 @@ struct GestureEngineTests {
     }
 
     // MARK: - CRIT-01: restartability
+
+    // MARK: - Palm rejection
+
+    @Test func typingRecentlySuppressesTwoFingerDoubleTap() async {
+        let source = StubGestureSource()
+        let scheduler = ManualGestureScheduler()
+        let keyboard = StubKeyboardActivity()
+        keyboard.isRecentlyPressed = true
+
+        let engine = makeEngine(
+            source: source,
+            supportedSlots: [.twoFingerDoubleTap],
+            scheduler: scheduler,
+            keyboardActivity: keyboard
+        )
+        engine.start()
+
+        let collector = EventCollector()
+        let collectionTask = collector.collect(from: engine.events)
+
+        await performTap(
+            source: source,
+            scheduler: scheduler,
+            frames: makeTapFrames(fingerCount: 2)
+        )
+        scheduler.advance(by: 0.10)
+        await performTap(
+            source: source,
+            scheduler: scheduler,
+            frames: makeTapFrames(fingerCount: 2)
+        )
+
+        #expect(collector.events.isEmpty)
+
+        engine.stop()
+        await collectionTask.value
+    }
+
+    @Test func typingIdleDoesNotBlockTwoFingerDoubleTap() async {
+        let source = StubGestureSource()
+        let scheduler = ManualGestureScheduler()
+        let keyboard = StubKeyboardActivity()
+        keyboard.isRecentlyPressed = false
+
+        let engine = makeEngine(
+            source: source,
+            supportedSlots: [.twoFingerDoubleTap],
+            scheduler: scheduler,
+            keyboardActivity: keyboard
+        )
+        engine.start()
+
+        let collector = EventCollector()
+        let collectionTask = collector.collect(from: engine.events)
+
+        await performTap(
+            source: source,
+            scheduler: scheduler,
+            frames: makeTapFrames(fingerCount: 2)
+        )
+        scheduler.advance(by: 0.10)
+        await performTap(
+            source: source,
+            scheduler: scheduler,
+            frames: makeTapFrames(fingerCount: 2)
+        )
+
+        #expect(collector.events.map(\.slot) == [.twoFingerDoubleTap])
+
+        engine.stop()
+        await collectionTask.value
+    }
+
+    @Test func typingWindowDoesNotSuppressSwipe() async {
+        let source = StubGestureSource()
+        let scheduler = ManualGestureScheduler()
+        let keyboard = StubKeyboardActivity()
+        keyboard.isRecentlyPressed = true
+
+        let engine = makeEngine(
+            source: source,
+            scheduler: scheduler,
+            keyboardActivity: keyboard
+        )
+        engine.start()
+        let eventsStream = engine.events
+
+        let frames = makeSwipeFrames(fingerCount: 3, startX: 0.1, startY: 0.5, endX: 0.9, endY: 0.5)
+        let received = await driveAndCollect(engine: engine, source: source,
+                                             scheduler: scheduler,
+                                             frames: frames, eventsStream: eventsStream)
+
+        #expect(received.map(\.slot) == [.threeFingerSwipeRight])
+    }
+
+    @Test func palmRestAtOppositeCornersDoesNotEmitTwoFingerDoubleTap() async {
+        let source = StubGestureSource()
+        let scheduler = ManualGestureScheduler()
+        let engine = makeEngine(
+            source: source,
+            supportedSlots: [.twoFingerDoubleTap],
+            scheduler: scheduler
+        )
+        engine.start()
+
+        let collector = EventCollector()
+        let collectionTask = collector.collect(from: engine.events)
+
+        // Two palm-like contacts on opposite horizontal edges: aspect-corrected
+        // spread ≈ 0.90 * 1.5 = 1.35, well above the 2-finger 0.70 threshold.
+        func palmFrame() -> [TouchPoint] {
+            [
+                TouchPoint(identifier: 1, normalizedX: 0.05, normalizedY: 0.10,
+                           pressure: 0.3, state: .touching, total: 0.15, majorAxis: 12.0),
+                TouchPoint(identifier: 2, normalizedX: 0.95, normalizedY: 0.10,
+                           pressure: 0.3, state: .touching, total: 0.15, majorAxis: 12.0)
+            ]
+        }
+
+        await performTap(source: source, scheduler: scheduler, frames: [palmFrame()])
+        scheduler.advance(by: 0.10)
+        await performTap(source: source, scheduler: scheduler, frames: [palmFrame()])
+
+        #expect(collector.events.isEmpty)
+
+        engine.stop()
+        await collectionTask.value
+    }
 
     @Test func engineCanRestartAfterStop() async {
         let source = StubGestureSource()

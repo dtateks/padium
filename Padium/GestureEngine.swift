@@ -108,11 +108,19 @@ final class GestureEngine {
     // independent of OMS frame rate (90–120 Hz across hardware).
     private static let peakUpgradeSettleWindow: TimeInterval = 0.080
 
+    // Window after any key press during which a trackpad tap is suppressed.
+    // Covers the "palm brushes trackpad while typing" scenario that no
+    // geometric filter can fully reject. Sized to bridge the fastest tap
+    // cadence users chain (≈ 100 ms) without bleeding into deliberate
+    // post-typing gestures that start from a paused hand.
+    private static let typingPalmRejectionWindow: TimeInterval = 0.2
+
     private let source: any GestureSource
     private let classifierFactory: @Sendable () -> GestureClassifier
     private let scheduler: any GestureScheduling
     private let supportedSlots: Set<GestureSlot>
     private let multitouchSink: any MultitouchStateSink
+    private let keyboardActivity: (any KeyboardActivitySensing)?
 
     private var activeSlots: Set<GestureSlot>
     private(set) var events: AsyncStream<GestureEvent>
@@ -127,7 +135,8 @@ final class GestureEngine {
         source: any GestureSource,
         supportedSlots: Set<GestureSlot>,
         scheduler: (any GestureScheduling)? = nil,
-        multitouchSink: (any MultitouchStateSink)? = nil
+        multitouchSink: (any MultitouchStateSink)? = nil,
+        keyboardActivity: (any KeyboardActivitySensing)? = nil
     ) {
         self.source = source
         self.classifierFactory = { GestureClassifier() }
@@ -135,6 +144,7 @@ final class GestureEngine {
         self.supportedSlots = supportedSlots
         self.activeSlots = supportedSlots
         self.multitouchSink = multitouchSink ?? ScrollSuppressor.shared
+        self.keyboardActivity = keyboardActivity
         (events, continuation) = AsyncStream<GestureEvent>.makeStream()
     }
 
@@ -143,7 +153,8 @@ final class GestureEngine {
         classifier: GestureClassifier,
         supportedSlots: Set<GestureSlot>,
         scheduler: (any GestureScheduling)? = nil,
-        multitouchSink: (any MultitouchStateSink)? = nil
+        multitouchSink: (any MultitouchStateSink)? = nil,
+        keyboardActivity: (any KeyboardActivitySensing)? = nil
     ) {
         self.source = source
         self.classifierFactory = { classifier }
@@ -151,6 +162,7 @@ final class GestureEngine {
         self.supportedSlots = supportedSlots
         self.activeSlots = supportedSlots
         self.multitouchSink = multitouchSink ?? ScrollSuppressor.shared
+        self.keyboardActivity = keyboardActivity
         (events, continuation) = AsyncStream<GestureEvent>.makeStream()
     }
 
@@ -370,6 +382,10 @@ final class GestureEngine {
         }
         guard travel <= maximumTravel else {
             PadiumLogger.gesture.debug("TAP-DIAG: REJECTED travel=\(travel) > max=\(maximumTravel)")
+            return
+        }
+        if keyboardActivity?.wasKeyPressedRecently(within: Self.typingPalmRejectionWindow) == true {
+            PadiumLogger.gesture.debug("TAP-DIAG: REJECTED typing-palm fc=\(candidate.peakFingerCount)")
             return
         }
         PadiumLogger.gesture.debug("TAP-DIAG: ACCEPTED tap fc=\(candidate.peakFingerCount) dur=\(duration) travel=\(travel)")
