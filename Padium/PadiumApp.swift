@@ -55,9 +55,13 @@ struct PadiumApp: App {
     var body: some Scene {
         Window("Padium", id: "settings") {
             SettingsContentView(appState: appState)
+                .background(SettingsWindowBridge(appDelegate: appDelegate))
                 .onAppear {
                     appDelegate.appState = appState
                     appState.isSettingsPresented = true
+                }
+                .onDisappear {
+                    appState.isSettingsPresented = false
                 }
         }
         .windowResizability(.contentSize)
@@ -71,6 +75,7 @@ struct PadiumApp: App {
 
 class AppDelegate: NSObject, NSApplicationDelegate {
     weak var appState: AppState?
+    var showSettingsWindow: (() -> Void)?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         openSettingsWindow()
@@ -82,15 +87,41 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationDidBecomeActive(_ notification: Notification) {
+        guard !(appState?.isSettingsPresented ?? false) else { return }
         openSettingsWindow()
     }
 
+    func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
+        false
+    }
+
     private func openSettingsWindow() {
-        DispatchQueue.main.async {
-            NSApp.activate(ignoringOtherApps: true)
-            if let window = NSApplication.shared.windows.first {
-                window.makeKeyAndOrderFront(nil)
+        showSettingsWindow?()
+    }
+}
+
+private struct SettingsWindowBridge: View {
+    let appDelegate: AppDelegate
+
+    @Environment(\.openWindow) private var openWindow
+
+    var body: some View {
+        Color.clear
+            .frame(width: 0, height: 0)
+            .onAppear {
+                appDelegate.showSettingsWindow = { [openWindow] in
+                    openWindow(id: "settings")
+                    focusSettingsWindow()
+                }
             }
+    }
+}
+
+private func focusSettingsWindow() {
+    DispatchQueue.main.async {
+        NSApp.activate(ignoringOtherApps: true)
+        if let window = NSApplication.shared.windows.first {
+            window.makeKeyAndOrderFront(nil)
         }
     }
 }

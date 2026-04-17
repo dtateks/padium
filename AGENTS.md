@@ -1,6 +1,6 @@
 # Padium — Agent Memory
 
-**Updated:** 2026-04-16 00:00
+**Updated:** 2026-04-18 00:00
 **Commit:** 0e0c074
 **Branch:** unknown
 
@@ -20,6 +20,7 @@ Bundle ID: `com.padium`, version 0.1.0. LSUIElement=true (no Dock icon).
   ```
   scripts/run-dev.sh
   ```
+- After any code change, run `scripts/run-dev.sh` so the latest app build is installed/opened before reporting completion.
 - `scripts/install-hooks.sh` enables the local pre-push release fast lane by setting `git config --local core.hooksPath .githooks`, so Git runs the version-controlled hook directly from `.githooks/pre-push`
 - Builds unsigned, replaces `/Applications/Padium.app` by default (or `$PADIUM_INSTALL_DIR`) by moving the built app into place, signs once with a stable Apple Development/Mac Development identity, then opens the installed copy.
 - Stable install path + stable signing identity avoids repeated Accessibility re-grants from changing signatures.
@@ -40,7 +41,6 @@ Bundle ID: `com.padium`, version 0.1.0. LSUIElement=true (no Dock icon).
 ## Architecture
 ```
 PadiumApp (@main)
-├─ MenuBarExtra — status + settings button
 ├─ Window(id: "settings") — TabView
 │   ├─ PermissionsView (Tab 1) — Accessibility status + System Settings link
 │   └─ SettingsView (Tab 2) — KeyboardShortcuts.Recorder per slot
@@ -71,7 +71,7 @@ Physical click path: `ScrollSuppressor` CGEventTap detects configured 3/4-finger
 - Shared sensitivity changes apply immediately without restarting the runtime for swipes and touch taps; `GestureClassifier` reads the current swipe threshold live and tap travel tolerance uses the same boosted sensitivity curve. UI sensitivity applies a +20 point base boost before threshold mapping, so default 50% behaves like the previous 70% calibration
 - `AppState` refreshes live runtime/config state from `UserDefaults` changes; shortcut-binding changes must refresh conflict state and gesture routing together
 - `ShortcutRegistry.name(for:)` is the SINGLE source of truth for slot→`KeyboardShortcuts.Name` mapping — no ad-hoc Name creation elsewhere
-- Settings window: app launch starts permission polling immediately; menu-bar selection explicitly calls `openWindow(id: "settings")` and focuses the existing window; `onDisappear` resets `isSettingsPresented` to `false`
+- Settings window: app launch starts permission polling immediately; app activation/reopen focuses the existing settings window; `onDisappear` resets `isSettingsPresented` to `false`
 - Permissions revoked while running → `refreshPermissions()` stops the runtime
 - `SystemGestureManager.shared` handles selective save/disable/restore of system gesture preferences; `AppState` computes configured-slot conflicts before suppressing, passes full system-gesture settings so Dock keys only disable when all enabled vertical gestures are suppressed, and restores originals on runtime stop / app termination
 - `SystemGestureManager.restoreIfNeeded()` runs at app launch to recover from a crash that left gestures suppressed

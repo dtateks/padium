@@ -4,7 +4,7 @@
 
 | File | Role | Key Detail |
 |------|------|------------|
-| PadiumApp.swift | @main entry | MenuBarExtra + Window(id: "settings"), `SettingsContentView` owns TabView |
+| PadiumApp.swift | @main entry | Window(id: "settings"), `SettingsContentView` owns TabView |
 | AppState.swift | Orchestration | `@Observable`, owns runtime Task, injects shortcut/middle-click emitters, routes physical 3/4-finger click events from `ScrollSuppressor`, and suppresses same-sequence touch taps |
 | GestureEngine.swift | Pipeline | Tracks stable candidates by finger count + touch IDs, arbitrates tap vs double-tap on lift, emits once, suppresses duplicates until lift |
 | GestureClassifier.swift | Classification | Stable touch IDs, dominant-axis commitment, per-finger direction agreement, lateral-drift tolerance on vertical swipes |
@@ -32,7 +32,7 @@
 - `PermissionCoordinator` polling is owned by `AppState` from app launch so permission revocation can stop the runtime even while settings is closed
 - Launch without Accessibility permission immediately prompts, then terminates; `PadiumApp` bypasses that path under XCTest so host-app tests can run
 - `AppState` refreshes active slots and live runtime/config state from `UserDefaults` changes; shortcut-binding changes must refresh conflict state and gesture routing together
-- Menu-bar selection explicitly focuses the existing settings window rather than spawning duplicates
+- App activation/reopen explicitly focuses the existing settings window rather than spawning duplicates
 - `AppState.setAppInteractionActive(_:)` marks Padium's own menu/settings surfaces as UI-interaction mode so `ScrollSuppressor` passes physical left-click events through while the user is interacting with Padium itself
 - `PreemptionController.conflictingSlots(for:)` returns only the currently configured Padium slots that still conflict with enabled system gestures; `AppState` refreshes this after permission and shortcut-binding changes
 - OMS reads raw touches in parallel with macOS — it cannot suppress system gesture recognizers; `SystemGestureManager` handles system gesture prefs (Mission Control, Spaces, App Exposé); Dock keys are only disabled when all enabled vertical gestures are suppressed, not when a single finger-count variant is suppressed. `ScrollSuppressor` handles scroll-during-multitouch via CGEventTap and still activates only for 3+ active fingers

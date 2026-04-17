@@ -115,6 +115,53 @@ struct PermissionCoordinatorTests {
     }
 }
 
+@MainActor
+struct AppDelegateTests {
+    @Test func applicationStaysAliveAfterLastWindowCloses() {
+        let delegate = AppDelegate()
+        #expect(delegate.applicationShouldTerminateAfterLastWindowClosed(NSApplication.shared) == false)
+    }
+
+    @Test func appIsAgentOnlyWithoutDockIcon() {
+        #expect(Bundle.main.object(forInfoDictionaryKey: "LSUIElement") as? Bool == true)
+    }
+
+    @Test func applicationShouldHandleReopenRequestsSettingsWindow() {
+        let delegate = AppDelegate()
+        var openCount = 0
+        delegate.showSettingsWindow = { openCount += 1 }
+
+        #expect(delegate.applicationShouldHandleReopen(NSApplication.shared, hasVisibleWindows: false) == true)
+        #expect(openCount == 1)
+    }
+
+    @Test func applicationDidBecomeActiveRequestsSettingsWindowWhenHidden() {
+        let delegate = AppDelegate()
+        let state = AppState(permissionChecker: MockPermissionChecker())
+        state.isSettingsPresented = false
+        delegate.appState = state
+
+        var openCount = 0
+        delegate.showSettingsWindow = { openCount += 1 }
+
+        delegate.applicationDidBecomeActive(Notification(name: NSApplication.didBecomeActiveNotification))
+        #expect(openCount == 1)
+    }
+
+    @Test func applicationDidBecomeActiveDoesNotRequestSettingsWindowWhenAlreadyPresented() {
+        let delegate = AppDelegate()
+        let state = AppState(permissionChecker: MockPermissionChecker())
+        state.isSettingsPresented = true
+        delegate.appState = state
+
+        var openCount = 0
+        delegate.showSettingsWindow = { openCount += 1 }
+
+        delegate.applicationDidBecomeActive(Notification(name: NSApplication.didBecomeActiveNotification))
+        #expect(openCount == 0)
+    }
+}
+
 // MARK: - AppState tests
 
 @Suite(.serialized)
