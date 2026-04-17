@@ -81,7 +81,7 @@ struct SettingsContentView: View {
             .padding(.vertical, 14)
             .background(Color(nsColor: .controlBackgroundColor).opacity(0.5))
         }
-        .frame(width: 740, height: 500)
+        .frame(width: 740)
         .onAppear {
             appState.setAppInteractionActive(true)
             appState.refreshPermissions()

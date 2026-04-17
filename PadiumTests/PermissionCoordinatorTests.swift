@@ -155,12 +155,16 @@ struct AppStateTests {
         ScrollSuppressor.shared.stop()
     }
 
-    private func makeLeftClickEvent(_ type: CGEventType, clickState: Int64 = 1) -> CGEvent {
+    private func makeLeftClickEvent(
+        _ type: CGEventType,
+        clickState: Int64 = 1,
+        location: CGPoint = CGPoint(x: 40, y: 60)
+    ) -> CGEvent {
         guard let source = CGEventSource(stateID: .hidSystemState),
               let event = CGEvent(
                 mouseEventSource: source,
                 mouseType: type,
-                mouseCursorPosition: CGPoint(x: 40, y: 60),
+                mouseCursorPosition: location,
                 mouseButton: .left
               )
         else {
@@ -169,6 +173,17 @@ struct AppStateTests {
 
         event.setIntegerValueField(.mouseEventClickState, value: clickState)
         return event
+    }
+
+    private func makeMenuBarClickLocation() -> CGPoint {
+        guard let screen = NSScreen.main else {
+            return CGPoint(x: 40, y: 60)
+        }
+
+        return CGPoint(
+            x: screen.frame.midX,
+            y: screen.visibleFrame.maxY + 2
+        )
     }
 
     @Test @MainActor func initialStateNotRunning() {
@@ -466,6 +481,7 @@ struct AppStateTests {
         await pumpEventLoop()
 
         ScrollSuppressor.shared.currentFingerCount = 3
+        ScrollSuppressor.shared.isMultitouchActive = true
         let physicalDown = makeLeftClickEvent(.leftMouseDown)
         let physicalUp = makeLeftClickEvent(.leftMouseUp)
 
@@ -509,6 +525,7 @@ struct AppStateTests {
         await pumpEventLoop()
 
         ScrollSuppressor.shared.currentFingerCount = 3
+        ScrollSuppressor.shared.isMultitouchActive = true
         let physicalDown = makeLeftClickEvent(.leftMouseDown)
         let physicalUp = makeLeftClickEvent(.leftMouseUp)
 
@@ -675,12 +692,16 @@ struct ScrollSuppressorTests {
         }
     }
 
-    private func makeLeftClickEvent(_ type: CGEventType, clickState: Int64 = 1) -> CGEvent {
+    private func makeLeftClickEvent(
+        _ type: CGEventType,
+        clickState: Int64 = 1,
+        location: CGPoint = CGPoint(x: 40, y: 60)
+    ) -> CGEvent {
         guard let source = CGEventSource(stateID: .hidSystemState),
               let event = CGEvent(
                 mouseEventSource: source,
                 mouseType: type,
-                mouseCursorPosition: CGPoint(x: 40, y: 60),
+                mouseCursorPosition: location,
                 mouseButton: .left
               )
         else {
@@ -691,9 +712,21 @@ struct ScrollSuppressorTests {
         return event
     }
 
+    private func makeMenuBarClickLocation() -> CGPoint {
+        guard let screen = NSScreen.main else {
+            return CGPoint(x: 40, y: 60)
+        }
+
+        return CGPoint(
+            x: screen.frame.midX,
+            y: screen.visibleFrame.maxY + 2
+        )
+    }
+
     @Test func physicalThreeFingerClickEmitsConfiguredSlotAndSuppressesPair() {
         let suppressor = ScrollSuppressor()
         suppressor.currentFingerCount = 3
+        suppressor.isMultitouchActive = true
         let recorder = SlotRecorder()
         suppressor.setPhysicalClickHandler { event in
             recorder.slots.append(event.slot)
@@ -727,6 +760,7 @@ struct ScrollSuppressorTests {
         let scheduler = ManualPhysicalClickScheduler()
         let suppressor = ScrollSuppressor(clickScheduler: scheduler)
         suppressor.currentFingerCount = 3
+        suppressor.isMultitouchActive = true
         let recorder = SlotRecorder()
         suppressor.setPhysicalClickHandler { event in
             recorder.slots.append(event.slot)
@@ -763,6 +797,7 @@ struct ScrollSuppressorTests {
         let scheduler = ManualPhysicalClickScheduler()
         let suppressor = ScrollSuppressor(clickScheduler: scheduler)
         suppressor.currentFingerCount = 4
+        suppressor.isMultitouchActive = true
         let recorder = SlotRecorder()
         suppressor.setPhysicalClickHandler { event in
             recorder.slots.append(event.slot)
@@ -816,9 +851,112 @@ struct ScrollSuppressorTests {
         #expect(recorder.slots == [.fourFingerDoubleClick])
     }
 
+    @Test func configuredPhysicalClickPassesThroughWithoutActiveMultitouch() {
+        let cases: [(fingerCount: Int, single: GestureSlot, double: GestureSlot)] = [
+            (3, .threeFingerClick, .threeFingerDoubleClick),
+            (4, .fourFingerClick, .fourFingerDoubleClick)
+        ]
+
+        for testCase in cases {
+            let suppressor = ScrollSuppressor()
+            let recorder = SlotRecorder()
+            suppressor.currentFingerCount = testCase.fingerCount
+            suppressor.isMultitouchActive = false
+            suppressor.setPhysicalClickHandler { event in
+                recorder.slots.append(event.slot)
+            }
+
+            switch suppressor.eventDisposition(
+                for: .leftMouseDown,
+                event: makeLeftClickEvent(.leftMouseDown),
+                configuredClickSlotsResolver: { _ in (testCase.single, testCase.double) }
+            ) {
+            case .passThrough:
+                break
+            case .suppress:
+                Issue.record("Expected configured click down to pass through without active multitouch")
+            }
+
+            switch suppressor.eventDisposition(
+                for: .leftMouseUp,
+                event: makeLeftClickEvent(.leftMouseUp),
+                configuredClickSlotsResolver: { _ in (nil, nil) }
+            ) {
+            case .passThrough:
+                break
+            case .suppress:
+                Issue.record("Expected configured click up to pass through without active multitouch")
+            }
+
+            #expect(recorder.slots.isEmpty)
+            #expect(suppressor.shouldAllowTouchTap(fingerCount: testCase.fingerCount, at: Date()) == true)
+        }
+    }
+
+    @Test func configuredPhysicalClickPassesThroughWhileAppInteractionIsActive() {
+        let suppressor = ScrollSuppressor()
+        suppressor.currentFingerCount = 3
+        suppressor.isMultitouchActive = true
+        suppressor.setAppInteractionActive(true)
+        let recorder = SlotRecorder()
+        suppressor.setPhysicalClickHandler { event in
+            recorder.slots.append(event.slot)
+        }
+
+        switch suppressor.eventDisposition(
+            for: .leftMouseDown,
+            event: makeLeftClickEvent(.leftMouseDown),
+            configuredClickSlotsResolver: { _ in (.threeFingerClick, .threeFingerDoubleClick) }
+        ) {
+        case .passThrough:
+            break
+        case .suppress:
+            Issue.record("Expected configured click down to pass through while app interaction is active")
+        }
+
+        switch suppressor.eventDisposition(
+            for: .leftMouseUp,
+            event: makeLeftClickEvent(.leftMouseUp),
+            configuredClickSlotsResolver: { _ in (nil, nil) }
+        ) {
+        case .passThrough:
+            break
+        case .suppress:
+            Issue.record("Expected configured click up to pass through while app interaction is active")
+        }
+
+        #expect(recorder.slots.isEmpty)
+        #expect(suppressor.shouldAllowTouchTap(fingerCount: 3, at: Date()) == true)
+    }
+
+    @Test func configuredPhysicalClickPassesThroughInSystemMenuBar() {
+        let suppressor = ScrollSuppressor()
+        suppressor.currentFingerCount = 3
+        suppressor.isMultitouchActive = true
+        let recorder = SlotRecorder()
+        suppressor.setPhysicalClickHandler { event in
+            recorder.slots.append(event.slot)
+        }
+
+        switch suppressor.eventDisposition(
+            for: .leftMouseDown,
+            event: makeLeftClickEvent(.leftMouseDown, location: makeMenuBarClickLocation()),
+            configuredClickSlotsResolver: { _ in (.threeFingerClick, .threeFingerDoubleClick) }
+        ) {
+        case .passThrough:
+            break
+        case .suppress:
+            Issue.record("Expected configured click in system menu bar to pass through")
+        }
+
+        #expect(recorder.slots.isEmpty)
+        #expect(suppressor.shouldAllowTouchTap(fingerCount: 3, at: Date()) == true)
+    }
+
     @Test func unconfiguredPhysicalClickPassesThroughWithoutTouchTapDedupWindow() {
         let suppressor = ScrollSuppressor()
         suppressor.currentFingerCount = 3
+        suppressor.isMultitouchActive = true
 
         switch suppressor.eventDisposition(
             for: .leftMouseDown,

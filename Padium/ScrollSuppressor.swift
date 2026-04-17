@@ -39,6 +39,7 @@ final class DispatchPhysicalClickWork: PhysicalClickScheduledWork {
 protocol PhysicalClickCoordinating: AnyObject, Sendable {
     typealias ClickHandler = @Sendable (GestureEvent) -> Void
     func setPhysicalClickHandler(_ handler: ClickHandler?)
+    func setAppInteractionActive(_ isActive: Bool)
     func start()
     func stop()
     func shouldAllowTouchTap(fingerCount: Int, at timestamp: Date) -> Bool
@@ -56,8 +57,9 @@ protocol MultitouchStateSink: AnyObject, Sendable {
 /// Uses a CGEventTap at `.cghidEventTap` to intercept `scrollWheel`,
 /// `leftMouseDown`, and `leftMouseUp` events. When `isMultitouchActive` is true,
 /// scroll events (including subsequent momentum events) are consumed so they don't
-/// reach the active window. Physical left clicks with 3+ fingers can also be
-/// routed through AppState as click/double-click gesture events when configured.
+/// reach the active window. Physical left clicks with 3/4 fingers are only
+/// routed through AppState when stable multitouch is active, so raw landing/lift
+/// frames do not swallow ordinary UI clicks.
 ///
 /// Thread-safety: `isMultitouchActive` is set from the OMS touch callback thread
 /// and read from the CGEventTap callback thread. Uses `os_unfair_lock` for safety.
@@ -119,6 +121,7 @@ final class ScrollSuppressor: @unchecked Sendable, PhysicalClickCoordinating, Mu
     private var _lastPhysicalClickAtByFingerCount: [Int: TimeInterval] = [:]
     private var _pendingPhysicalClicksByFingerCount: [Int: PendingPhysicalClick] = [:]
     private var _physicalClickHandler: PhysicalClickHandler?
+    private var _appInteractionActive = false
     private var _tapRunLoop: CFRunLoop?
 
     private let clickScheduler: any PhysicalClickScheduling
@@ -256,6 +259,7 @@ final class ScrollSuppressor: @unchecked Sendable, PhysicalClickCoordinating, Mu
         }
         _pendingPhysicalClicksByFingerCount = [:]
         _physicalClickHandler = nil
+        _appInteractionActive = false
         os_unfair_lock_unlock(&_lock)
 
         PadiumLogger.gesture.info("Scroll suppressor stopped")
@@ -264,6 +268,20 @@ final class ScrollSuppressor: @unchecked Sendable, PhysicalClickCoordinating, Mu
     func setPhysicalClickHandler(_ handler: PhysicalClickHandler?) {
         os_unfair_lock_lock(&_lock)
         _physicalClickHandler = handler
+        os_unfair_lock_unlock(&_lock)
+    }
+
+    func setAppInteractionActive(_ isActive: Bool) {
+        os_unfair_lock_lock(&_lock)
+        _appInteractionActive = isActive
+        if isActive {
+            _leftMouseState = .idle
+            _lastPhysicalClickAtByFingerCount = [:]
+            for pendingClick in _pendingPhysicalClicksByFingerCount.values {
+                pendingClick.work.cancel()
+            }
+            _pendingPhysicalClicksByFingerCount = [:]
+        }
         os_unfair_lock_unlock(&_lock)
     }
 
@@ -371,6 +389,10 @@ final class ScrollSuppressor: @unchecked Sendable, PhysicalClickCoordinating, Mu
         os_unfair_lock_lock(&_lock)
 
         if type == .leftMouseUp {
+            if _appInteractionActive {
+                os_unfair_lock_unlock(&_lock)
+                return .passThrough
+            }
             if _leftMouseState == .suppressingHandledPair {
                 _leftMouseState = .idle
                 disposition = .suppress
@@ -384,7 +406,23 @@ final class ScrollSuppressor: @unchecked Sendable, PhysicalClickCoordinating, Mu
             return .passThrough
         }
 
+        if Self.isSystemMenuBarClick(at: event.location) {
+            PadiumLogger.gesture.notice("Click pass-through: system menu bar")
+            os_unfair_lock_unlock(&_lock)
+            return .passThrough
+        }
+
+        if _appInteractionActive {
+            PadiumLogger.gesture.notice("Click pass-through: Padium UI interaction active")
+            os_unfair_lock_unlock(&_lock)
+            return .passThrough
+        }
+
         let fingerCount = _currentFingerCount
+        guard _multitouchActive, (3...4).contains(fingerCount) else {
+            os_unfair_lock_unlock(&_lock)
+            return .passThrough
+        }
 
         let configuredSlots = configuredClickSlotsResolver(fingerCount)
         guard configuredSlots.single != nil || configuredSlots.double != nil else {
@@ -398,6 +436,7 @@ final class ScrollSuppressor: @unchecked Sendable, PhysicalClickCoordinating, Mu
 
         _leftMouseState = .suppressingHandledPair
         disposition = .suppress
+        PadiumLogger.gesture.notice("Click suppressed for configured physical gesture: fingerCount=\(fingerCount, privacy: .public)")
 
         if let doubleSlot = configuredSlots.double,
            clickState >= 2 {
@@ -485,6 +524,12 @@ final class ScrollSuppressor: @unchecked Sendable, PhysicalClickCoordinating, Mu
             (.fourFingerClick, .fourFingerDoubleClick)
         default:
             nil
+        }
+    }
+
+    private static func isSystemMenuBarClick(at location: CGPoint) -> Bool {
+        NSScreen.screens.contains { screen in
+            screen.frame.contains(location) && location.y >= screen.visibleFrame.maxY
         }
     }
 
