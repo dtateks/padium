@@ -99,6 +99,27 @@ struct GestureClassifier: Sendable {
     // Contacts with a major ellipse axis above this are likely a palm.
     private static let palmMajorAxisThreshold: Float = 30.0
 
+    // Maximum aspect-corrected distance between any two contacts of the same
+    // gesture, expressed in units of trackpad height (dx is already scaled by
+    // `trackpadAspectRatio`). The rule: N fingers of a real gesture come from
+    // ONE hand, so their mutual distances fit within hand reach; contacts that
+    // come from two hands (e.g. palms resting on opposite corners while typing)
+    // exceed any plausible single-hand spread.
+    //
+    // Tuned on the smallest common trackpad (MacBook Air 13", ~12cm × 7.5cm):
+    //   - 2 fingers: typical index+middle spread ≤ ~3cm → ≈ 0.45 aspect-corrected.
+    //     0.70 admits even thumb+middle taps on large hands while rejecting
+    //     palms placed ≥ ~6cm apart.
+    //   - 3 fingers: index+middle+ring ≤ ~5cm → ≈ 0.80. 1.00 covers large hands
+    //     while rejecting palm+finger mixes and 2-palm+1-finger artefacts.
+    //   - 4+ fingers: natural hand spread on small trackpads can approach the
+    //     full width; direction-agreement and finger-identity stability carry
+    //     the load here, so no spread gate is imposed.
+    private static let handSpreadThresholds: [Int: Float] = [
+        2: 0.70,
+        3: 1.00
+    ]
+
     // Swipes are only recognized for these finger counts; lower counts are
     // reserved for system gestures (2-finger scroll/back), higher counts
     // aren't exposed as slots today.
@@ -199,13 +220,40 @@ struct GestureClassifier: Sendable {
                 return nil
             }
         }
+        guard Self.contactsFitOneHand(contactsByIdentifier) else {
+            return nil
+        }
         return contactsByIdentifier
     }
 
     static func travelDistance(from startPoint: TouchPoint, to currentPoint: TouchPoint) -> Float {
+        aspectCorrectedDistance(from: startPoint, to: currentPoint)
+    }
+
+    static func aspectCorrectedDistance(from startPoint: TouchPoint, to currentPoint: TouchPoint) -> Float {
         let dx = (currentPoint.normalizedX - startPoint.normalizedX) * trackpadAspectRatio
         let dy = currentPoint.normalizedY - startPoint.normalizedY
         return sqrt((dx * dx) + (dy * dy))
+    }
+
+    /// Rejects contact sets whose mutual spread exceeds one hand's reach —
+    /// the load-bearing signal against two-handed palm artefacts (two palms on
+    /// opposite corners of the trackpad while the user types). No threshold
+    /// is configured for 1-finger (spread is undefined) or 4+ fingers (natural
+    /// spread can approach the full trackpad on small devices).
+    static func contactsFitOneHand(_ contacts: [Int: TouchPoint]) -> Bool {
+        guard let threshold = handSpreadThresholds[contacts.count] else { return true }
+        let points = Array(contacts.values)
+        for firstIndex in 0..<points.count {
+            for secondIndex in (firstIndex + 1)..<points.count {
+                let distance = aspectCorrectedDistance(
+                    from: points[firstIndex],
+                    to: points[secondIndex]
+                )
+                if distance > threshold { return false }
+            }
+        }
+        return true
     }
 
     // MARK: - Internal

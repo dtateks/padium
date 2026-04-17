@@ -222,4 +222,61 @@ struct GestureClassifierTests {
         let last = frame(3, x: 0.9, y: 0.5, state: .lingering)
         #expect(c.classifyIncremental(firstFrame: first, currentFrame: last, peakFingerCount: 3)?.slot == .threeFingerSwipeRight)
     }
+
+    // MARK: - Hand-spread rejection (palm-at-corners)
+
+    @Test func rejectsTwoFingerContactsFurtherApartThanOneHand() {
+        let c = makeClassifier()
+        // Two contacts on opposite edges: aspect-corrected spread ≈ 1.35.
+        let wide = [
+            pt(id: 1, x: 0.05, y: 0.10),
+            pt(id: 2, x: 0.95, y: 0.10)
+        ]
+        #expect(c.stableActiveContacts(in: wide) == nil)
+    }
+
+    @Test func acceptsTwoFingerContactsWithinHandSpread() {
+        let c = makeClassifier()
+        // Index + middle finger ~3cm apart on a typical trackpad: aspect-corrected 0.06.
+        let close = [
+            pt(id: 1, x: 0.48, y: 0.50),
+            pt(id: 2, x: 0.52, y: 0.50)
+        ]
+        #expect(c.stableActiveContacts(in: close) != nil)
+    }
+
+    @Test func rejectsThreeFingerContactsFurtherApartThanOneHand() {
+        let c = makeClassifier()
+        // Three contacts spanning aspect-corrected ≈ 1.20 — exceeds 3-finger threshold 1.00.
+        let wide = [
+            pt(id: 1, x: 0.10, y: 0.20),
+            pt(id: 2, x: 0.50, y: 0.20),
+            pt(id: 3, x: 0.90, y: 0.20)
+        ]
+        #expect(c.stableActiveContacts(in: wide) == nil)
+    }
+
+    @Test func acceptsThreeFingerContactsInTypicalSpread() {
+        let c = makeClassifier()
+        // 3 fingers adjacent: aspect-corrected ≈ 0.45.
+        let normal = [
+            pt(id: 1, x: 0.40, y: 0.50),
+            pt(id: 2, x: 0.50, y: 0.50),
+            pt(id: 3, x: 0.60, y: 0.50)
+        ]
+        #expect(c.stableActiveContacts(in: normal) != nil)
+    }
+
+    @Test func doesNotApplySpreadCheckToFourFingerContacts() {
+        let c = makeClassifier()
+        // A wide 4-finger gesture on a small trackpad can span almost the full width.
+        // Direction-agreement carries the load here, not spread.
+        let wide = [
+            pt(id: 1, x: 0.05, y: 0.50),
+            pt(id: 2, x: 0.35, y: 0.50),
+            pt(id: 3, x: 0.65, y: 0.50),
+            pt(id: 4, x: 0.95, y: 0.50)
+        ]
+        #expect(c.stableActiveContacts(in: wide) != nil)
+    }
 }
