@@ -2,6 +2,7 @@ import SwiftUI
 
 @main
 struct PadiumApp: App {
+    @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
     @State private var appState: AppState
 
     init() {
@@ -11,8 +12,6 @@ struct PadiumApp: App {
                 NSApp.terminate(nil)
             }
 
-            // Restore system gestures on any normal termination path.
-            // Use both willTerminate (normal quit) and SIGTERM handler (force quit from Activity Monitor).
             NotificationCenter.default.addObserver(
                 forName: NSApplication.willTerminateNotification,
                 object: nil,
@@ -24,19 +23,16 @@ struct PadiumApp: App {
 
             let src = DispatchSource.makeSignalSource(signal: SIGTERM, queue: .main)
             src.setEventHandler {
-                // Flush defaults IMMEDIATELY before any async work to prevent shortcut loss.
                 UserDefaults.standard.synchronize()
                 Self.restoreSystemGesturesAndExit()
             }
             src.resume()
             signal(SIGTERM, SIG_IGN)
-            // Keep reference alive
             Self._sigtermSource = src
         }
         _appState = State(initialValue: state)
     }
 
-    // Prevent ARC from releasing the SIGTERM source.
     nonisolated(unsafe) private static var _sigtermSource: DispatchSourceSignal?
 
     nonisolated private static func restoreSystemGestures() {
@@ -57,17 +53,15 @@ struct PadiumApp: App {
     }
 
     var body: some Scene {
-        MenuBarExtra("Padium", systemImage: "hand.tap") {
-            MenuBarContentView(appState: appState)
-        }
-
-        Window("Padium Settings", id: "settings") {
+        Window("Padium", id: "settings") {
             SettingsContentView(appState: appState)
+                .onAppear {
+                    appDelegate.appState = appState
+                    appState.isSettingsPresented = true
+                }
         }
-        .defaultSize(width: 400, height: 500)
+        .windowResizability(.contentSize)
         .commands {
-            // Remove the standard Edit menu so its key equivalents (⌘C, ⌘V, etc.)
-            // don't block KeyboardShortcuts.Recorder from accepting those shortcuts.
             CommandGroup(replacing: .textEditing) {}
             CommandGroup(replacing: .undoRedo) {}
             CommandGroup(replacing: .pasteboard) {}
@@ -75,91 +69,28 @@ struct PadiumApp: App {
     }
 }
 
-struct MenuBarContentView: View {
-    @Bindable var appState: AppState
-    @Environment(\.openWindow) private var openWindow
+class AppDelegate: NSObject, NSApplicationDelegate {
+    weak var appState: AppState?
 
-    private let settingsWindowTitle = "Padium Settings"
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            if appState.isRunning {
-                if appState.conflictingSlots.isEmpty {
-                    Label("Running", systemImage: "checkmark.circle.fill")
-                        .foregroundStyle(.green)
-                        .font(.caption)
-                } else {
-                    Label("Running — system gesture conflicts", systemImage: "exclamationmark.triangle.fill")
-                        .foregroundStyle(.orange)
-                        .font(.caption)
-                }
-            } else if appState.permissionState == .denied {
-                Label("Accessibility required", systemImage: "exclamationmark.triangle")
-                    .foregroundStyle(.orange)
-                    .font(.caption)
-            }
-
-            Button("Settings…", action: presentSettingsWindow)
-
-            Divider()
-
-            Button("Quit") {
-                NSApp.terminate(nil)
-            }
-        }
-        .padding(8)
-        .onAppear {
-            appState.refreshPermissions()
-        }
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        openSettingsWindow()
     }
 
-    private func presentSettingsWindow() {
-        appState.isSettingsPresented = true
-        openWindow(id: "settings")
-        NSApp.activate(ignoringOtherApps: true)
-
-        Task { @MainActor in
-            for _ in 0..<3 {
-                if focusSettingsWindow() {
-                    return
-                }
-                await Task.yield()
-            }
-        }
-    }
-
-    private func focusSettingsWindow() -> Bool {
-        guard let window = NSApp.windows.first(where: { $0.title == settingsWindowTitle }) else {
-            return false
-        }
-
-        window.makeKeyAndOrderFront(nil)
-        window.orderFrontRegardless()
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        openSettingsWindow()
         return true
     }
-}
 
-struct SettingsContentView: View {
-    @Bindable var appState: AppState
+    func applicationDidBecomeActive(_ notification: Notification) {
+        openSettingsWindow()
+    }
 
-    var body: some View {
-        TabView {
-            PermissionsView(
-                permissionState: appState.permissionState,
-                systemGestureNotice: appState.systemGestureNotice,
-                conflictingSettings: appState.systemGestureSettings(),
-                onRequestAccessibility: { appState.requestAccessibility() },
-                onOpenTrackpadSettings: { appState.openTrackpadSettings() },
-                onRefreshConflicts: { appState.refreshSystemGestureConflicts() }
-            )
-            .tabItem { Label("Permissions", systemImage: "lock.shield") }
-
-            SettingsView(appState: appState)
-                .tabItem { Label("Gestures", systemImage: "hand.draw") }
-        }
-        .padding()
-        .onDisappear {
-            appState.isSettingsPresented = false
+    private func openSettingsWindow() {
+        DispatchQueue.main.async {
+            NSApp.activate(ignoringOtherApps: true)
+            if let window = NSApplication.shared.windows.first {
+                window.makeKeyAndOrderFront(nil)
+            }
         }
     }
 }
