@@ -99,6 +99,11 @@ struct GestureClassifier: Sendable {
     // Contacts with a major ellipse axis above this are likely a palm.
     private static let palmMajorAxisThreshold: Float = 30.0
 
+    // Swipes are only recognized for these finger counts; lower counts are
+    // reserved for system gestures (2-finger scroll/back), higher counts
+    // aren't exposed as slots today.
+    private static let supportedSwipeFingerCounts: Set<Int> = [3, 4]
+
     init() {
         self.swipeThresholdProvider = { GestureSensitivitySetting.currentSwipeThreshold() }
     }
@@ -135,7 +140,7 @@ struct GestureClassifier: Sendable {
         currentContacts: [Int: TouchPoint],
         peakFingerCount: Int
     ) -> GestureEvent? {
-        guard peakFingerCount == 3 || peakFingerCount == 4 else { return nil }
+        guard Self.supportedSwipeFingerCounts.contains(peakFingerCount) else { return nil }
         guard firstContacts.count == peakFingerCount, currentContacts.count == peakFingerCount else { return nil }
         guard Set(firstContacts.keys) == Set(currentContacts.keys) else { return nil }
 
