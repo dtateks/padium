@@ -19,10 +19,14 @@ struct SettingsContentView: View {
                 
                 Spacer()
                 
-                if appState.permissionState == .granted && appState.conflictingSlots.isEmpty {
+                if appState.runtimeStatus == .active && appState.conflictingSlots.isEmpty {
                     statusBadge(title: "ACTIVE", color: .green)
-                } else if appState.permissionState == .denied {
-                    statusBadge(title: "AX DENIED", color: .red)
+                } else if appState.runtimeStatus == .permissionsRequired {
+                    statusBadge(title: "PERMISSIONS", color: .red)
+                } else if appState.runtimeStatus == .degraded {
+                    statusBadge(title: "DEGRADED", color: .orange)
+                } else if appState.runtimeStatus == .checking {
+                    statusBadge(title: "CHECKING", color: .secondary)
                 } else {
                     statusBadge(title: "CONFLICTS", color: .orange)
                 }
@@ -34,10 +38,16 @@ struct SettingsContentView: View {
 
             Divider()
 
-            if appState.permissionState == .denied {
+            if appState.runtimeStatus == .permissionsRequired {
                 permissionRequiredView
             } else {
-                gestureConfigurationView
+                VStack(spacing: 0) {
+                    if appState.runtimeStatus == .degraded {
+                        runtimeAttentionView
+                        Divider()
+                    }
+                    gestureConfigurationView
+                }
             }
 
             Divider()
@@ -107,25 +117,90 @@ struct SettingsContentView: View {
                 .font(.system(size: 48))
                 .foregroundStyle(.red.opacity(0.8))
             
-            Text("ACCESSIBILITY REQUIRED")
+            Text("PERMISSIONS REQUIRED")
                 .font(.system(size: 14, weight: .bold, design: .monospaced))
                 .foregroundStyle(.primary)
             
-            Text("Padium needs Accessibility permission to simulate\nkeyboard shortcuts and intercept trackpad events.")
-                .font(.system(size: 12))
-                .foregroundStyle(.secondary)
-                .multilineTextAlignment(.center)
-                .padding(.horizontal, 40)
-
-            Button("Grant Permission") {
-                appState.requestAccessibility()
+            VStack(alignment: .leading, spacing: 8) {
+                ForEach(Array(appState.missingPermissionMessages.enumerated()), id: \.offset) { _, message in
+                    HStack(alignment: .top, spacing: 8) {
+                        Text("•")
+                        Text(message)
+                    }
+                    .font(.system(size: 12))
+                    .foregroundStyle(.secondary)
+                }
             }
-            .buttonStyle(.borderedProminent)
-            .controlSize(.regular)
+            .padding(.horizontal, 40)
+
+            HStack(spacing: 12) {
+                Button("Grant Missing Access") {
+                    appState.requestMissingPermissions()
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.regular)
+
+                Button("Refresh") {
+                    appState.refreshPermissions()
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.regular)
+            }
             .padding(.top, 8)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color(nsColor: .windowBackgroundColor))
+    }
+
+    private var runtimeAttentionView: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("RUNTIME ATTENTION")
+                .font(.system(size: 11, weight: .bold, design: .monospaced))
+                .foregroundStyle(.orange)
+
+            VStack(alignment: .leading, spacing: 6) {
+                ForEach(Array(appState.missingPermissionMessages.enumerated()), id: \.offset) { _, message in
+                    HStack(alignment: .top, spacing: 8) {
+                        Image(systemName: "exclamationmark.triangle.fill")
+                            .foregroundStyle(.orange)
+                            .font(.caption2)
+                        Text(message)
+                    }
+                    .font(.system(size: 12))
+                    .foregroundStyle(.secondary)
+                }
+
+                ForEach(Array(appState.runtimeFailureMessages.enumerated()), id: \.offset) { _, message in
+                    HStack(alignment: .top, spacing: 8) {
+                        Image(systemName: "exclamationmark.triangle.fill")
+                            .foregroundStyle(.orange)
+                            .font(.caption2)
+                        Text(message)
+                    }
+                    .font(.system(size: 12))
+                    .foregroundStyle(.secondary)
+                }
+            }
+
+            HStack(spacing: 12) {
+                if !appState.missingPermissionMessages.isEmpty {
+                    Button("Grant Missing Access") {
+                        appState.requestMissingPermissions()
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.regular)
+                }
+
+                Button("Refresh") {
+                    appState.refreshPermissions()
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.regular)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(20)
+        .background(Color.orange.opacity(0.08))
     }
 
     private var gestureConfigurationView: some View {

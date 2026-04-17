@@ -40,7 +40,7 @@ protocol PhysicalClickCoordinating: AnyObject, Sendable {
     typealias ClickHandler = @Sendable (GestureEvent) -> Void
     func setPhysicalClickHandler(_ handler: ClickHandler?)
     func setAppInteractionActive(_ isActive: Bool)
-    func start()
+    @discardableResult func start() -> Bool
     func stop()
     func shouldAllowTouchTap(fingerCount: Int, at timestamp: Date) -> Bool
 }
@@ -186,8 +186,9 @@ final class ScrollSuppressor: @unchecked Sendable, PhysicalClickCoordinating, Mu
         return _tapRunLoop
     }
 
-    func start() {
-        guard eventTap == nil else { return }
+    @discardableResult
+    func start() -> Bool {
+        guard eventTap == nil else { return true }
 
         let mask: CGEventMask =
             (1 << CGEventType.scrollWheel.rawValue) |
@@ -203,7 +204,7 @@ final class ScrollSuppressor: @unchecked Sendable, PhysicalClickCoordinating, Mu
             userInfo: Unmanaged.passUnretained(self).toOpaque()
         ) else {
             PadiumLogger.gesture.error("Failed to create scroll suppressor event tap")
-            return
+            return false
         }
 
         eventTap = tap
@@ -211,7 +212,7 @@ final class ScrollSuppressor: @unchecked Sendable, PhysicalClickCoordinating, Mu
         guard let source = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, tap, 0) else {
             PadiumLogger.gesture.error("Failed to create run loop source for scroll suppressor")
             eventTap = nil
-            return
+            return false
         }
 
         runLoopSource = source
@@ -235,6 +236,7 @@ final class ScrollSuppressor: @unchecked Sendable, PhysicalClickCoordinating, Mu
         tapThread = thread
 
         PadiumLogger.gesture.info("Scroll suppressor started")
+        return true
     }
 
     func stop() {

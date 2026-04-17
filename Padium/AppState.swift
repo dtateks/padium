@@ -65,6 +65,15 @@ protocol SystemGestureManaging: AnyObject {
 extension PreemptionController: PreemptionControlling {}
 extension SystemGestureManager: SystemGestureManaging {}
 
+private let keyboardShortcutDidChangeNotification = Notification.Name("KeyboardShortcuts_shortcutByNameDidChange")
+
+enum RuntimeStatus: Equatable, Sendable {
+    case checking
+    case permissionsRequired
+    case degraded
+    case active
+}
+
 @MainActor @Observable
 final class AppState {
     private enum GestureEventSource {
@@ -78,7 +87,43 @@ final class AppState {
     }
 
     var permissionState: PermissionState { coordinator.permissionState }
-    var isRunning: Bool { runtimeTask != nil }
+    var inputMonitoringState: PermissionState { coordinator.inputMonitoringState }
+    var postEventState: PermissionState { coordinator.postEventState }
+    var hasOutputAccess: Bool { coordinator.hasOutputAccess }
+    var hasInputMonitoringAccess: Bool { coordinator.hasInputMonitoringAccess }
+    var isTouchRuntimeActive: Bool { runtimeTask != nil }
+    var isPhysicalClickRuntimeActive: Bool { physicalClickRuntimeActive }
+    var isRunning: Bool { isTouchRuntimeActive || isPhysicalClickRuntimeActive }
+    var runtimeStatus: RuntimeStatus {
+        if permissionState == .checking || inputMonitoringState == .checking || postEventState == .checking {
+            return .checking
+        }
+        if !hasOutputAccess {
+            return .permissionsRequired
+        }
+        if !hasInputMonitoringAccess || touchRuntimeFailure != nil || physicalClickRuntimeFailure != nil {
+            return .degraded
+        }
+        return .active
+    }
+    var missingPermissionMessages: [String] {
+        var messages: [String] = []
+
+        if permissionState != .granted {
+            messages.append("Allow Accessibility so Padium can control other apps.")
+        }
+        if postEventState != .granted {
+            messages.append("Allow Padium to send shortcuts and middle-clicks to other apps.")
+        }
+        if inputMonitoringState != .granted {
+            messages.append("Allow Input Monitoring so Padium can capture physical clicks and suppress scroll during gestures.")
+        }
+
+        return messages
+    }
+    var runtimeFailureMessages: [String] {
+        [touchRuntimeFailure, physicalClickRuntimeFailure].compactMap { $0 }
+    }
     var systemGestureNotice: String?
     var conflictingSlots: Set<GestureSlot> = []
     let supportedGestureSlots: [GestureSlot]
@@ -93,8 +138,13 @@ final class AppState {
     private let middleClickEmitter: any MiddleClickEmitting
     private let scrollSuppressor: any PhysicalClickCoordinating
     private var runtimeTask: Task<Void, Never>?
+    private var physicalClickRuntimeActive = false
+    private var isAppInteractionActive = false
+    private var touchRuntimeFailure: String?
+    private var physicalClickRuntimeFailure: String?
     private var observedConfiguration: StoredConfiguration
     private var defaultsObserver: NSObjectProtocol?
+    private var shortcutObserver: NSObjectProtocol?
 
     init(
         permissionChecker: PermissionChecking = SystemPermissionChecker(),
@@ -123,6 +173,7 @@ final class AppState {
             gestureSensitivity: initialGestureSensitivity
         )
         self.defaultsObserver = nil
+        self.shortcutObserver = nil
 
         if let gestureEngine {
             self.gestureEngine = gestureEngine
@@ -147,13 +198,23 @@ final class AppState {
                 self?.refreshStoredConfigurationIfNeeded()
             }
         }
+        shortcutObserver = NotificationCenter.default.addObserver(
+            forName: keyboardShortcutDidChangeNotification,
+            object: nil,
+            queue: nil
+        ) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                UserDefaults.standard.synchronize()
+                self?.refreshStoredConfigurationIfNeeded()
+            }
+        }
     }
 
     /// Check permissions and auto-start runtime if granted. Also refreshes system gesture conflicts.
     func refreshPermissions() {
         coordinator.checkPermissions()
 
-        if coordinator.isFullyGranted {
+        if coordinator.hasOutputAccess {
             startRuntimeIfNeeded()
         } else {
             stopRuntime()
@@ -164,6 +225,10 @@ final class AppState {
 
     func requestAccessibility() {
         coordinator.requestAccessibility()
+    }
+
+    func requestMissingPermissions() {
+        coordinator.requestMissingPermissions()
     }
 
     func refreshSystemGestureConflicts() {
@@ -178,6 +243,7 @@ final class AppState {
     }
 
     func setAppInteractionActive(_ isActive: Bool) {
+        isAppInteractionActive = isActive
         scrollSuppressor.setAppInteractionActive(isActive)
     }
 
@@ -192,15 +258,20 @@ final class AppState {
         startPermissionPolling()
         refreshPermissions()
 
-        guard !coordinator.isFullyGranted else { return }
+        guard coordinator.hasOutputAccess else {
+            PadiumLogger.permission.notice("Required output permissions missing at launch; prompting then terminating")
+            requestMissingPermissions()
+            stopPermissionPolling()
 
-        PadiumLogger.permission.notice("Accessibility missing at launch; prompting then terminating")
-        requestAccessibility()
-        stopPermissionPolling()
+            Task { @MainActor in
+                await Task.yield()
+                onMissingPermissions()
+            }
+            return
+        }
 
-        Task { @MainActor in
-            await Task.yield()
-            onMissingPermissions()
+        if !coordinator.hasInputMonitoringAccess {
+            requestMissingPermissions()
         }
     }
 
@@ -224,25 +295,30 @@ final class AppState {
 
     private func startRuntimeIfNeeded() {
         gestureEngine.updateActiveSlots(configuredGestureSlots())
+
+        startTouchRuntimeIfNeeded()
+
+        if coordinator.hasInputMonitoringAccess {
+            startPhysicalClickRuntimeIfNeeded()
+        } else {
+            stopPhysicalClickRuntime()
+            physicalClickRuntimeFailure = hasOutputAccess
+                ? "Input Monitoring is missing. Physical 3/4-finger click gestures and scroll suppression are unavailable."
+                : nil
+        }
+    }
+
+    private func startTouchRuntimeIfNeeded() {
         guard runtimeTask == nil else { return }
 
-        scrollSuppressor.setPhysicalClickHandler { [weak self] event in
-            Task { @MainActor [weak self] in
-                self?.handleGestureEvent(event, source: .physicalClick)
-            }
-        }
-        applySystemGestureSuppression()
-        scrollSuppressor.start()
-
         guard gestureEngine.start() else {
-            if let startError = gestureEngine.lastStartError {
-                PadiumLogger.gesture.error("Gesture engine failed to start: \(String(describing: startError), privacy: .public)")
-            }
-            scrollSuppressor.setPhysicalClickHandler(nil)
-            scrollSuppressor.stop()
+            touchRuntimeFailure = touchRuntimeFailureMessage()
             systemGestureManager.restore()
             return
         }
+
+        touchRuntimeFailure = nil
+        applySystemGestureSuppression()
 
         runtimeTask = Task { @MainActor [weak self] in
             guard let self else { return }
@@ -252,13 +328,48 @@ final class AppState {
         }
     }
 
+    private func startPhysicalClickRuntimeIfNeeded() {
+        guard !physicalClickRuntimeActive else {
+            physicalClickRuntimeFailure = nil
+            scrollSuppressor.setAppInteractionActive(isAppInteractionActive)
+            return
+        }
+
+        scrollSuppressor.setPhysicalClickHandler { [weak self] event in
+            Task { @MainActor [weak self] in
+                self?.handleGestureEvent(event, source: .physicalClick)
+            }
+        }
+
+        guard scrollSuppressor.start() else {
+            scrollSuppressor.setPhysicalClickHandler(nil)
+            physicalClickRuntimeFailure = "Event tap failed to start. Physical 3/4-finger click gestures and scroll suppression are unavailable."
+            return
+        }
+
+        scrollSuppressor.setAppInteractionActive(isAppInteractionActive)
+        physicalClickRuntimeActive = true
+        physicalClickRuntimeFailure = nil
+    }
+
     private func stopRuntime() {
+        stopTouchRuntime()
+        stopPhysicalClickRuntime()
+        touchRuntimeFailure = nil
+        physicalClickRuntimeFailure = nil
+    }
+
+    private func stopTouchRuntime() {
         gestureEngine.stop()
         runtimeTask?.cancel()
         runtimeTask = nil
+        systemGestureManager.restore()
+    }
+
+    private func stopPhysicalClickRuntime() {
         scrollSuppressor.setPhysicalClickHandler(nil)
         scrollSuppressor.stop()
-        systemGestureManager.restore()
+        physicalClickRuntimeActive = false
     }
 
     func handleShortcutConfigurationChange() {
@@ -301,9 +412,9 @@ final class AppState {
         }
 
         gestureEngine.updateActiveSlots(currentConfiguration.configuredSlots)
-        if isRunning {
+        if isTouchRuntimeActive {
             applySystemGestureSuppression()
-        } else if coordinator.isFullyGranted {
+        } else if coordinator.hasOutputAccess {
             startRuntimeIfNeeded()
         }
         refreshSystemGestureConflicts()
@@ -317,7 +428,7 @@ final class AppState {
     }
 
     private func handleGestureEvent(_ event: GestureEvent, source: GestureEventSource) {
-        guard coordinator.isFullyGranted else { return }
+        guard coordinator.hasOutputAccess else { return }
 
         if source == .touch, !shouldHandleTouchEvent(event) {
             return
@@ -347,6 +458,13 @@ final class AppState {
     private func actionKind(for slot: GestureSlot) -> GestureActionKind {
         guard slot.supportsActionKindChoice else { return .shortcut }
         return GestureActionStore.actionKind(for: slot)
+    }
+
+    private func touchRuntimeFailureMessage() -> String {
+        if let startError = gestureEngine.lastStartError {
+            PadiumLogger.gesture.error("Gesture engine failed to start: \(String(describing: startError), privacy: .public)")
+        }
+        return "Touch listener failed to start. Swipe and touch-tap gestures are unavailable."
     }
 }
 

@@ -113,6 +113,39 @@ struct PermissionCoordinatorTests {
         coordinator.requestAccessibility()
         #expect(checker.requestAccessibilityCallCount == 1)
     }
+
+    @Test @MainActor func checkPermissionsTracksInputMonitoringAndPostEventAccess() {
+        let checker = MockPermissionChecker(
+            accessibility: true,
+            inputMonitoring: false,
+            postEvents: true
+        )
+        let coordinator = PermissionCoordinator(checker: checker)
+
+        coordinator.checkPermissions()
+
+        #expect(coordinator.permissionState == .granted)
+        #expect(coordinator.inputMonitoringState == .denied)
+        #expect(coordinator.postEventState == .granted)
+        #expect(coordinator.hasOutputAccess == true)
+        #expect(coordinator.hasInputMonitoringAccess == false)
+    }
+
+    @Test @MainActor func requestMissingPermissionsDelegatesOnlyMissingCapabilities() {
+        let checker = MockPermissionChecker(
+            accessibility: true,
+            inputMonitoring: false,
+            postEvents: false
+        )
+        let coordinator = PermissionCoordinator(checker: checker)
+        coordinator.checkPermissions()
+
+        coordinator.requestMissingPermissions()
+
+        #expect(checker.requestAccessibilityCallCount == 0)
+        #expect(checker.requestListenEventAccessCallCount == 1)
+        #expect(checker.requestPostEventAccessCallCount == 1)
+    }
 }
 
 @MainActor
@@ -137,7 +170,11 @@ struct AppDelegateTests {
 
     @Test func applicationDidBecomeActiveRequestsSettingsWindowWhenHidden() {
         let delegate = AppDelegate()
-        let state = AppState(permissionChecker: MockPermissionChecker())
+        let state = AppState(
+            permissionChecker: MockPermissionChecker(),
+            gestureEngine: RecordingGestureRuntime(),
+            scrollSuppressor: RecordingPhysicalClickCoordinator()
+        )
         state.isSettingsPresented = false
         delegate.appState = state
 
@@ -150,7 +187,11 @@ struct AppDelegateTests {
 
     @Test func applicationDidBecomeActiveDoesNotRequestSettingsWindowWhenAlreadyPresented() {
         let delegate = AppDelegate()
-        let state = AppState(permissionChecker: MockPermissionChecker())
+        let state = AppState(
+            permissionChecker: MockPermissionChecker(),
+            gestureEngine: RecordingGestureRuntime(),
+            scrollSuppressor: RecordingPhysicalClickCoordinator()
+        )
         state.isSettingsPresented = true
         delegate.appState = state
 
@@ -174,7 +215,8 @@ struct AppStateTests {
         systemGestureManager: RecordingSystemGestureManager = RecordingSystemGestureManager(),
         runtime: RecordingGestureRuntime = RecordingGestureRuntime(),
         emitter: RecordingShortcutEmitter = RecordingShortcutEmitter(),
-        middleClickEmitter: RecordingMiddleClickEmitter = RecordingMiddleClickEmitter()
+        middleClickEmitter: RecordingMiddleClickEmitter = RecordingMiddleClickEmitter(),
+        scrollSuppressor: (any PhysicalClickCoordinating)? = RecordingPhysicalClickCoordinator()
     ) -> AppState {
         AppState(
             permissionChecker: checker,
@@ -182,7 +224,8 @@ struct AppStateTests {
             systemGestureManager: systemGestureManager,
             gestureEngine: runtime,
             shortcutEmitter: emitter,
-            middleClickEmitter: middleClickEmitter
+            middleClickEmitter: middleClickEmitter,
+            scrollSuppressor: scrollSuppressor
         )
     }
 
@@ -275,6 +318,74 @@ struct AppStateTests {
         state.refreshPermissions()
         #expect(state.isRunning == false)
         #expect(runtime.stopCallCount == 1)
+        _ = preservedConfig
+    }
+
+    @Test @MainActor func refreshPermissionsStartsTouchRuntimeWhenInputMonitoringMissing() {
+        let preservedConfig = GestureConfigurationPreserver()
+        let checker = MockPermissionChecker(
+            accessibility: true,
+            inputMonitoring: false,
+            postEvents: true
+        )
+        let runtime = RecordingGestureRuntime()
+        let scrollSuppressor = RecordingPhysicalClickCoordinator()
+        let state = makeState(
+            checker: checker,
+            runtime: runtime,
+            scrollSuppressor: scrollSuppressor
+        )
+
+        state.refreshPermissions()
+
+        #expect(state.isTouchRuntimeActive == true)
+        #expect(state.isPhysicalClickRuntimeActive == false)
+        #expect(state.isRunning == true)
+        #expect(state.runtimeStatus == .degraded)
+        #expect(scrollSuppressor.startCallCount == 0)
+        #expect(state.missingPermissionMessages.contains { $0.contains("Input Monitoring") })
+        _ = preservedConfig
+    }
+
+    @Test @MainActor func touchRuntimeFailureDoesNotStopPhysicalClickRuntime() {
+        let preservedConfig = GestureConfigurationPreserver()
+        let checker = MockPermissionChecker(accessibility: true)
+        let runtime = RecordingGestureRuntime(startResult: false)
+        let scrollSuppressor = RecordingPhysicalClickCoordinator(startResult: true)
+        let state = makeState(
+            checker: checker,
+            runtime: runtime,
+            scrollSuppressor: scrollSuppressor
+        )
+
+        state.refreshPermissions()
+
+        #expect(state.isTouchRuntimeActive == false)
+        #expect(state.isPhysicalClickRuntimeActive == true)
+        #expect(state.isRunning == true)
+        #expect(state.runtimeStatus == .degraded)
+        #expect(state.runtimeFailureMessages.contains { $0.contains("Touch listener failed to start") })
+        _ = preservedConfig
+    }
+
+    @Test @MainActor func physicalClickRuntimeFailureDoesNotStopTouchRuntime() {
+        let preservedConfig = GestureConfigurationPreserver()
+        let checker = MockPermissionChecker(accessibility: true)
+        let runtime = RecordingGestureRuntime()
+        let scrollSuppressor = RecordingPhysicalClickCoordinator(startResult: false)
+        let state = makeState(
+            checker: checker,
+            runtime: runtime,
+            scrollSuppressor: scrollSuppressor
+        )
+
+        state.refreshPermissions()
+
+        #expect(state.isTouchRuntimeActive == true)
+        #expect(state.isPhysicalClickRuntimeActive == false)
+        #expect(state.isRunning == true)
+        #expect(state.runtimeStatus == .degraded)
+        #expect(state.runtimeFailureMessages.contains { $0.contains("Event tap failed to start") })
         _ = preservedConfig
     }
 
@@ -472,6 +583,45 @@ struct AppStateTests {
         _ = preservedConfig
     }
 
+    @Test @MainActor func keyboardShortcutsNotificationUpdatesRuntimeActiveSlotsImmediately() async {
+        let preservedConfig = GestureConfigurationPreserver()
+        let runtime = RecordingGestureRuntime()
+        let state = makeState(
+            checker: MockPermissionChecker(accessibility: true),
+            runtime: runtime
+        )
+        #expect(runtime.activeSlotsHistory.last == [])
+
+        let name = ShortcutRegistry.name(for: .threeFingerDoubleTap)
+        KeyboardShortcuts.setShortcut(.init(.f13, modifiers: []), for: name)
+        await pumpEventLoop()
+
+        #expect(runtime.activeSlotsHistory.last == [.threeFingerDoubleTap])
+        _ = state
+        _ = preservedConfig
+    }
+
+    @Test @MainActor func keyboardShortcutsNotificationClearsRuntimeActiveSlotImmediately() async {
+        let preservedConfig = GestureConfigurationPreserver()
+        let runtime = RecordingGestureRuntime()
+        let state = makeState(
+            checker: MockPermissionChecker(accessibility: true),
+            runtime: runtime
+        )
+
+        let name = ShortcutRegistry.name(for: .threeFingerDoubleTap)
+        KeyboardShortcuts.setShortcut(.init(.f13, modifiers: []), for: name)
+        await pumpEventLoop()
+        #expect(runtime.activeSlotsHistory.last == [.threeFingerDoubleTap])
+
+        KeyboardShortcuts.setShortcut(nil, for: name)
+        await pumpEventLoop()
+
+        #expect(runtime.activeSlotsHistory.last == [])
+        _ = state
+        _ = preservedConfig
+    }
+
     @Test @MainActor func twoFingerDoubleTapConfigurationSuppressesSmartZoom() {
         let preservedConfig = GestureConfigurationPreserver()
         let controller = StubPreemptionController(settings: StubPreemptionController.allEnabledSettings)
@@ -517,35 +667,23 @@ struct AppStateTests {
         let checker = MockPermissionChecker(accessibility: true)
         let runtime = RecordingGestureRuntime()
         let emitter = RecordingShortcutEmitter()
+        let suppressor = RecordingPhysicalClickCoordinator()
         clearAllShortcutBindings()
         defer { clearAllShortcutBindings() }
 
         KeyboardShortcuts.setShortcut(.init(.f13, modifiers: []), for: ShortcutRegistry.name(for: .threeFingerClick))
         KeyboardShortcuts.setShortcut(.init(.f14, modifiers: []), for: ShortcutRegistry.name(for: .threeFingerDoubleTap))
 
-        let state = makeState(checker: checker, runtime: runtime, emitter: emitter)
+        let state = makeState(
+            checker: checker,
+            runtime: runtime,
+            emitter: emitter,
+            scrollSuppressor: suppressor
+        )
         state.refreshPermissions()
         await pumpEventLoop()
 
-        ScrollSuppressor.shared.currentFingerCount = 3
-        ScrollSuppressor.shared.isMultitouchActive = true
-        let physicalDown = makeLeftClickEvent(.leftMouseDown)
-        let physicalUp = makeLeftClickEvent(.leftMouseUp)
-
-        switch ScrollSuppressor.shared.eventDisposition(for: .leftMouseDown, event: physicalDown) {
-        case .suppress:
-            break
-        case .passThrough:
-            Issue.record("Expected configured physical click down to be suppressed")
-        }
-
-        switch ScrollSuppressor.shared.eventDisposition(for: .leftMouseUp, event: physicalUp) {
-        case .suppress:
-            break
-        case .passThrough:
-            Issue.record("Expected configured physical click up to be suppressed")
-        }
-
+        suppressor.emit(.threeFingerClick)
         await pumpEventLoop()
         #expect(emitter.emittedSlots == [.threeFingerClick])
 
@@ -562,41 +700,20 @@ struct AppStateTests {
         let checker = MockPermissionChecker(accessibility: true)
         let runtime = RecordingGestureRuntime()
         let emitter = RecordingShortcutEmitter()
+        let suppressor = RecordingPhysicalClickCoordinator()
         clearAllShortcutBindings()
         defer { clearAllShortcutBindings() }
 
         KeyboardShortcuts.setShortcut(.init(.f14, modifiers: []), for: ShortcutRegistry.name(for: .threeFingerDoubleTap))
 
-        let state = makeState(checker: checker, runtime: runtime, emitter: emitter)
+        let state = makeState(
+            checker: checker,
+            runtime: runtime,
+            emitter: emitter,
+            scrollSuppressor: suppressor
+        )
         state.refreshPermissions()
         await pumpEventLoop()
-
-        ScrollSuppressor.shared.currentFingerCount = 3
-        ScrollSuppressor.shared.isMultitouchActive = true
-        let physicalDown = makeLeftClickEvent(.leftMouseDown)
-        let physicalUp = makeLeftClickEvent(.leftMouseUp)
-
-        switch ScrollSuppressor.shared.eventDisposition(
-            for: .leftMouseDown,
-            event: physicalDown,
-            configuredClickSlotsResolver: { _ in (nil, nil) }
-        ) {
-        case .passThrough:
-            break
-        case .suppress:
-            Issue.record("Expected unconfigured physical click down to pass through")
-        }
-
-        switch ScrollSuppressor.shared.eventDisposition(
-            for: .leftMouseUp,
-            event: physicalUp,
-            configuredClickSlotsResolver: { _ in (nil, nil) }
-        ) {
-        case .passThrough:
-            break
-        case .suppress:
-            Issue.record("Expected unconfigured physical click up to pass through")
-        }
 
         runtime.yield(.threeFingerDoubleTap)
         await pumpEventLoop()
@@ -649,6 +766,8 @@ struct AppStateTests {
         #expect(state.isRunning == false)
         #expect(runtime.startCallCount == 0)
         #expect(checker.requestAccessibilityCallCount == 1)
+        #expect(checker.requestListenEventAccessCallCount == 1)
+        #expect(checker.requestPostEventAccessCallCount == 1)
         #expect(terminateCallCount == 1)
         _ = preservedConfig
     }
@@ -1036,16 +1155,38 @@ struct ScrollSuppressorTests {
 
 final class MockPermissionChecker: PermissionChecking, @unchecked Sendable {
     var accessibility: Bool
+    var inputMonitoring: Bool
+    var postEvents: Bool
     private(set) var requestAccessibilityCallCount = 0
+    private(set) var requestListenEventAccessCallCount = 0
+    private(set) var requestPostEventAccessCallCount = 0
 
-    init(accessibility: Bool = false) {
+    init(
+        accessibility: Bool = false,
+        inputMonitoring: Bool? = nil,
+        postEvents: Bool? = nil
+    ) {
         self.accessibility = accessibility
+        self.inputMonitoring = inputMonitoring ?? accessibility
+        self.postEvents = postEvents ?? accessibility
     }
 
     func isAccessibilityGranted() -> Bool { accessibility }
 
+    func isListenEventAccessGranted() -> Bool { inputMonitoring }
+
+    func isPostEventAccessGranted() -> Bool { postEvents }
+
     func requestAccessibility() {
         requestAccessibilityCallCount += 1
+    }
+
+    func requestListenEventAccess() {
+        requestListenEventAccessCallCount += 1
+    }
+
+    func requestPostEventAccess() {
+        requestPostEventAccessCallCount += 1
     }
 }
 
@@ -1138,22 +1279,28 @@ final class RecordingSystemGestureManager: SystemGestureManaging {
 
 @MainActor
 final class RecordingGestureRuntime: GestureRuntimeControlling {
+    private enum StubError: Error {
+        case startFailed
+    }
+
     private(set) var startCallCount = 0
     private(set) var stopCallCount = 0
     private(set) var activeSlotsHistory: [Set<GestureSlot>] = []
     private(set) var events: AsyncStream<GestureEvent>
     private var continuation: AsyncStream<GestureEvent>.Continuation
+    private let startResult: Bool
     var lastStartError: GestureEngineError?
 
-    init() {
+    init(startResult: Bool = true) {
+        self.startResult = startResult
         (events, continuation) = AsyncStream<GestureEvent>.makeStream()
     }
 
     func start() -> Bool {
         startCallCount += 1
-        lastStartError = nil
+        lastStartError = startResult ? nil : .sourceUnavailable(underlying: StubError.startFailed)
         (events, continuation) = AsyncStream<GestureEvent>.makeStream()
-        return true
+        return startResult
     }
 
     func stop() {
@@ -1167,6 +1314,47 @@ final class RecordingGestureRuntime: GestureRuntimeControlling {
 
     func yield(_ slot: GestureSlot) {
         continuation.yield(GestureEvent(slot: slot, timestamp: Date()))
+    }
+}
+
+final class RecordingPhysicalClickCoordinator: PhysicalClickCoordinating, @unchecked Sendable {
+    private let startResult: Bool
+    private(set) var startCallCount = 0
+    private(set) var stopCallCount = 0
+    private(set) var appInteractionStates: [Bool] = []
+    var shouldAllowTouchTapResult = true
+    private var handler: ClickHandler?
+
+    init(startResult: Bool = true) {
+        self.startResult = startResult
+    }
+
+    func setPhysicalClickHandler(_ handler: ClickHandler?) {
+        self.handler = handler
+    }
+
+    func setAppInteractionActive(_ isActive: Bool) {
+        appInteractionStates.append(isActive)
+    }
+
+    @discardableResult
+    func start() -> Bool {
+        startCallCount += 1
+        return startResult
+    }
+
+    func stop() {
+        stopCallCount += 1
+        handler = nil
+    }
+
+    func shouldAllowTouchTap(fingerCount: Int, at timestamp: Date) -> Bool {
+        shouldAllowTouchTapResult
+    }
+
+    func emit(_ slot: GestureSlot, blockTouchTap: Bool = true) {
+        shouldAllowTouchTapResult = !blockTouchTap
+        handler?(GestureEvent(slot: slot, timestamp: Date()))
     }
 }
 

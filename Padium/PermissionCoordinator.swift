@@ -11,7 +11,11 @@ enum PermissionState: Equatable, Sendable {
 
 protocol PermissionChecking {
     func isAccessibilityGranted() -> Bool
+    func isListenEventAccessGranted() -> Bool
+    func isPostEventAccessGranted() -> Bool
     func requestAccessibility()
+    func requestListenEventAccess()
+    func requestPostEventAccess()
 }
 
 struct SystemPermissionChecker: PermissionChecking {
@@ -19,15 +23,33 @@ struct SystemPermissionChecker: PermissionChecking {
         AXIsProcessTrusted()
     }
 
+    func isListenEventAccessGranted() -> Bool {
+        CGPreflightListenEventAccess()
+    }
+
+    func isPostEventAccessGranted() -> Bool {
+        CGPreflightPostEventAccess()
+    }
+
     func requestAccessibility() {
         let options = ["AXTrustedCheckOptionPrompt": true] as CFDictionary
         AXIsProcessTrustedWithOptions(options)
+    }
+
+    func requestListenEventAccess() {
+        _ = CGRequestListenEventAccess()
+    }
+
+    func requestPostEventAccess() {
+        _ = CGRequestPostEventAccess()
     }
 }
 
 @MainActor
 final class PermissionCoordinator {
     private(set) var permissionState: PermissionState = .checking
+    private(set) var inputMonitoringState: PermissionState = .checking
+    private(set) var postEventState: PermissionState = .checking
     private let checker: PermissionChecking
     private var pollTimer: Timer?
 
@@ -36,16 +58,30 @@ final class PermissionCoordinator {
     }
 
     var isFullyGranted: Bool {
-        permissionState == .granted
+        hasOutputAccess && hasInputMonitoringAccess
+    }
+
+    var hasOutputAccess: Bool {
+        permissionState == .granted && postEventState == .granted
+    }
+
+    var hasInputMonitoringAccess: Bool {
+        inputMonitoringState == .granted
     }
 
     func checkPermissions() {
         let accessibility = checker.isAccessibilityGranted()
+        let listenEvents = checker.isListenEventAccessGranted()
+        let postEvents = checker.isPostEventAccessGranted()
         permissionState = accessibility ? .granted : .denied
-        PadiumLogger.permission.info("Permission check: accessibility=\(accessibility)")
+        inputMonitoringState = listenEvents ? .granted : .denied
+        postEventState = postEvents ? .granted : .denied
+        PadiumLogger.permission.info(
+            "Permission check: accessibility=\(accessibility) listenEvents=\(listenEvents) postEvents=\(postEvents)"
+        )
     }
 
-    /// Start polling AXIsProcessTrusted every 2s so UI updates after user grants in System Settings.
+    /// Start polling runtime access every 2s so UI updates after user grants in System Settings.
     func startPolling(onUpdate: @escaping @MainActor () -> Void) {
         guard pollTimer == nil else { return }
         pollTimer = Timer.scheduledTimer(withTimeInterval: 2.0, repeats: true) { [weak self] _ in
@@ -78,5 +114,17 @@ final class PermissionCoordinator {
 
     func requestAccessibility() {
         checker.requestAccessibility()
+    }
+
+    func requestMissingPermissions() {
+        if permissionState != .granted {
+            checker.requestAccessibility()
+        }
+        if inputMonitoringState != .granted {
+            checker.requestListenEventAccess()
+        }
+        if postEventState != .granted {
+            checker.requestPostEventAccess()
+        }
     }
 }

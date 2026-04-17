@@ -87,6 +87,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationDidBecomeActive(_ notification: Notification) {
+        appState?.refreshPermissions()
         guard !(appState?.isSettingsPresented ?? false) else { return }
         openSettingsWindow()
     }
