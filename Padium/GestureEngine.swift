@@ -112,6 +112,7 @@ final class GestureEngine {
     private let classifierFactory: @Sendable () -> GestureClassifier
     private let scheduler: any GestureScheduling
     private let supportedSlots: Set<GestureSlot>
+    private let multitouchSink: any MultitouchStateSink
 
     private var activeSlots: Set<GestureSlot>
     private(set) var events: AsyncStream<GestureEvent>
@@ -125,13 +126,15 @@ final class GestureEngine {
     init(
         source: any GestureSource,
         supportedSlots: Set<GestureSlot>,
-        scheduler: (any GestureScheduling)? = nil
+        scheduler: (any GestureScheduling)? = nil,
+        multitouchSink: (any MultitouchStateSink)? = nil
     ) {
         self.source = source
         self.classifierFactory = { GestureClassifier() }
         self.scheduler = scheduler ?? TaskGestureScheduler()
         self.supportedSlots = supportedSlots
         self.activeSlots = supportedSlots
+        self.multitouchSink = multitouchSink ?? ScrollSuppressor.shared
         (events, continuation) = AsyncStream<GestureEvent>.makeStream()
     }
 
@@ -139,13 +142,15 @@ final class GestureEngine {
         source: any GestureSource,
         classifier: GestureClassifier,
         supportedSlots: Set<GestureSlot>,
-        scheduler: (any GestureScheduling)? = nil
+        scheduler: (any GestureScheduling)? = nil,
+        multitouchSink: (any MultitouchStateSink)? = nil
     ) {
         self.source = source
         self.classifierFactory = { classifier }
         self.scheduler = scheduler ?? TaskGestureScheduler()
         self.supportedSlots = supportedSlots
         self.activeSlots = supportedSlots
+        self.multitouchSink = multitouchSink ?? ScrollSuppressor.shared
         (events, continuation) = AsyncStream<GestureEvent>.makeStream()
     }
 
@@ -177,10 +182,11 @@ final class GestureEngine {
                 return
             }
 
+            let sink = self.multitouchSink
             defer {
                 localContinuation.finish()
-                ScrollSuppressor.shared.currentFingerCount = 0
-                ScrollSuppressor.shared.isMultitouchActive = false
+                sink.currentFingerCount = 0
+                sink.isMultitouchActive = false
             }
 
             var candidate: GestureCandidate?
@@ -191,7 +197,7 @@ final class GestureEngine {
                     break
                 }
 
-                ScrollSuppressor.shared.currentFingerCount = frame.count
+                sink.currentFingerCount = frame.count
 
                 if frame.isEmpty {
                     if let candidate {
@@ -200,7 +206,7 @@ final class GestureEngine {
                     }
                     candidate = nil
                     waitingForLift = false
-                    ScrollSuppressor.shared.isMultitouchActive = false
+                    sink.isMultitouchActive = false
                     continue
                 }
 
@@ -234,9 +240,9 @@ final class GestureEngine {
                     if var preserved = candidate {
                         preserved.recordTravel(using: contacts)
                         candidate = preserved
-                        ScrollSuppressor.shared.isMultitouchActive = preserved.peakFingerCount >= 3
+                        sink.isMultitouchActive = preserved.peakFingerCount >= 3
                     } else {
-                        ScrollSuppressor.shared.isMultitouchActive = false
+                        sink.isMultitouchActive = false
                     }
                     PadiumLogger.gesture.debug("TAP-DIAG: no active slots for fc=\(fingerCount), candidate=\(candidate != nil)")
                     continue
@@ -245,14 +251,10 @@ final class GestureEngine {
                 // Reflect the gesture's intent (peak count) when reporting
                 // multitouch activity so scroll suppression keeps holding
                 // through brief lift transitions of 3/4-finger gestures.
-                ScrollSuppressor.shared.isMultitouchActive = max(fingerCount, candidate?.peakFingerCount ?? 0) >= 3
+                sink.isMultitouchActive = max(fingerCount, candidate?.peakFingerCount ?? 0) >= 3
 
                 guard let activeCandidate = candidate else {
-                    candidate = GestureCandidate(
-                        originContacts: contacts,
-                        peakFingerCount: fingerCount,
-                        startedAt: self.scheduler.now
-                    )
+                    candidate = self.makeCandidate(contacts: contacts, peakFingerCount: fingerCount)
                     continue
                 }
 
@@ -260,11 +262,7 @@ final class GestureEngine {
                     // UPGRADE: more fingers than ever seen. Re-anchor at the
                     // new peak so swipe displacement is measured from when
                     // the user's intended finger count was actually present.
-                    candidate = GestureCandidate(
-                        originContacts: contacts,
-                        peakFingerCount: fingerCount,
-                        startedAt: self.scheduler.now
-                    )
+                    candidate = self.makeCandidate(contacts: contacts, peakFingerCount: fingerCount)
                     continue
                 }
 
@@ -282,11 +280,7 @@ final class GestureEngine {
                 // fingerCount == peakFingerCount.
                 guard activeCandidate.trackedIdentifiers == Set(contacts.keys) else {
                     // ID churn at the peak — re-anchor with the new identifiers.
-                    candidate = GestureCandidate(
-                        originContacts: contacts,
-                        peakFingerCount: fingerCount,
-                        startedAt: self.scheduler.now
-                    )
+                    candidate = self.makeCandidate(contacts: contacts, peakFingerCount: fingerCount)
                     continue
                 }
 
@@ -326,8 +320,16 @@ final class GestureEngine {
         pipelineTask?.cancel()
         pipelineTask = nil
         isRunning = false
-        ScrollSuppressor.shared.currentFingerCount = 0
-        ScrollSuppressor.shared.isMultitouchActive = false
+        multitouchSink.currentFingerCount = 0
+        multitouchSink.isMultitouchActive = false
+    }
+
+    private func makeCandidate(contacts: [Int: TouchPoint], peakFingerCount: Int) -> GestureCandidate {
+        GestureCandidate(
+            originContacts: contacts,
+            peakFingerCount: peakFingerCount,
+            startedAt: scheduler.now
+        )
     }
 
     private func hasActiveSlots(for fingerCount: Int) -> Bool {
@@ -387,18 +389,14 @@ final class GestureEngine {
         let activation = tapActivation(for: fingerCount)
         guard activation.hasAnyTapSlot else { return }
 
-        if let pendingTap = pendingTaps[fingerCount],
-           recognizedAt.timeIntervalSince(pendingTap.recognizedAt) <= GestureTapSettings.doubleTapWindow,
+        let priorTap = pendingTaps.removeValue(forKey: fingerCount)
+        priorTap?.scheduledWork.cancel()
+
+        if let priorTap,
+           recognizedAt.timeIntervalSince(priorTap.recognizedAt) <= GestureTapSettings.doubleTapWindow,
            let doubleTapSlot = activation.doubleTapSlot {
-            pendingTap.scheduledWork.cancel()
-            pendingTaps.removeValue(forKey: fingerCount)
             emit(doubleTapSlot, at: recognizedAt, using: continuation)
             return
-        }
-
-        if let pendingTap = pendingTaps[fingerCount] {
-            pendingTap.scheduledWork.cancel()
-            pendingTaps.removeValue(forKey: fingerCount)
         }
 
         let scheduledWork = scheduler.schedule(after: GestureTapSettings.doubleTapWindow) { [weak self] in

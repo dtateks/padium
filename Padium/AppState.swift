@@ -91,6 +91,7 @@ final class AppState {
     private let gestureEngine: any GestureRuntimeControlling
     private let shortcutEmitter: any ShortcutEmitting
     private let middleClickEmitter: any MiddleClickEmitting
+    private let scrollSuppressor: any PhysicalClickCoordinating
     private var runtimeTask: Task<Void, Never>?
     private var observedConfiguration: StoredConfiguration
     private var defaultsObserver: NSObjectProtocol?
@@ -101,7 +102,8 @@ final class AppState {
         systemGestureManager: (any SystemGestureManaging)? = nil,
         gestureEngine: (any GestureRuntimeControlling)? = nil,
         shortcutEmitter: (any ShortcutEmitting)? = nil,
-        middleClickEmitter: (any MiddleClickEmitting)? = nil
+        middleClickEmitter: (any MiddleClickEmitting)? = nil,
+        scrollSuppressor: (any PhysicalClickCoordinating)? = nil
     ) {
         self.coordinator = PermissionCoordinator(checker: permissionChecker)
 
@@ -130,6 +132,7 @@ final class AppState {
 
         self.shortcutEmitter = shortcutEmitter ?? ShortcutEmitter()
         self.middleClickEmitter = middleClickEmitter ?? MiddleClickEmitter()
+        self.scrollSuppressor = scrollSuppressor ?? ScrollSuppressor.shared
         self.gestureEngine.updateActiveSlots(configuredGestureSlots())
         refreshSystemGestureConflicts()
         defaultsObserver = NotificationCenter.default.addObserver(
@@ -216,20 +219,20 @@ final class AppState {
         gestureEngine.updateActiveSlots(configuredGestureSlots())
         guard runtimeTask == nil else { return }
 
-        ScrollSuppressor.shared.setPhysicalClickHandler { [weak self] event in
+        scrollSuppressor.setPhysicalClickHandler { [weak self] event in
             Task { @MainActor [weak self] in
                 self?.handleGestureEvent(event, source: .physicalClick)
             }
         }
         applySystemGestureSuppression()
-        ScrollSuppressor.shared.start()
+        scrollSuppressor.start()
 
         guard gestureEngine.start() else {
             if let startError = gestureEngine.lastStartError {
                 PadiumLogger.gesture.error("Gesture engine failed to start: \(String(describing: startError), privacy: .public)")
             }
-            ScrollSuppressor.shared.setPhysicalClickHandler(nil)
-            ScrollSuppressor.shared.stop()
+            scrollSuppressor.setPhysicalClickHandler(nil)
+            scrollSuppressor.stop()
             systemGestureManager.restore()
             return
         }
@@ -246,8 +249,8 @@ final class AppState {
         gestureEngine.stop()
         runtimeTask?.cancel()
         runtimeTask = nil
-        ScrollSuppressor.shared.setPhysicalClickHandler(nil)
-        ScrollSuppressor.shared.stop()
+        scrollSuppressor.setPhysicalClickHandler(nil)
+        scrollSuppressor.stop()
         systemGestureManager.restore()
     }
 
@@ -324,7 +327,7 @@ final class AppState {
 
     private func shouldHandleTouchEvent(_ event: GestureEvent) -> Bool {
         guard event.slot.isTouchTapGesture else { return true }
-        guard ScrollSuppressor.shared.shouldAllowTouchTap(
+        guard scrollSuppressor.shouldAllowTouchTap(
             fingerCount: event.slot.fingerCount,
             at: event.timestamp
         ) else {

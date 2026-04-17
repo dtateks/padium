@@ -33,6 +33,24 @@ final class DispatchPhysicalClickWork: PhysicalClickScheduledWork {
     }
 }
 
+/// Orchestration-facing surface of the scroll suppressor: lifecycle, physical-click
+/// routing, and the post-click touch-tap guard. Narrowed so AppState depends on
+/// behaviour rather than a shared singleton.
+protocol PhysicalClickCoordinating: AnyObject, Sendable {
+    typealias ClickHandler = @Sendable (GestureEvent) -> Void
+    func setPhysicalClickHandler(_ handler: ClickHandler?)
+    func start()
+    func stop()
+    func shouldAllowTouchTap(fingerCount: Int, at timestamp: Date) -> Bool
+}
+
+/// Write-only surface of multitouch state used by the gesture pipeline to keep
+/// scroll suppression and the trackpad-active flag in sync with the touch stream.
+protocol MultitouchStateSink: AnyObject, Sendable {
+    var currentFingerCount: Int { get set }
+    var isMultitouchActive: Bool { get set }
+}
+
 /// Suppresses macOS scroll wheel events while 3+ finger multitouch is active.
 ///
 /// Uses a CGEventTap at `.cghidEventTap` to intercept `scrollWheel`,
@@ -43,7 +61,7 @@ final class DispatchPhysicalClickWork: PhysicalClickScheduledWork {
 ///
 /// Thread-safety: `isMultitouchActive` is set from the OMS touch callback thread
 /// and read from the CGEventTap callback thread. Uses `os_unfair_lock` for safety.
-final class ScrollSuppressor: @unchecked Sendable {
+final class ScrollSuppressor: @unchecked Sendable, PhysicalClickCoordinating, MultitouchStateSink {
 
     typealias PhysicalClickHandler = @Sendable (GestureEvent) -> Void
 
@@ -65,6 +83,28 @@ final class ScrollSuppressor: @unchecked Sendable {
         case suppressingHandledPair
     }
 
+    // Raw values of CGEvent's kCGScrollWheelEventScrollPhase field. CoreGraphics
+    // exposes these as opaque Int64 with no Swift enum; named cases make the
+    // suppression logic self-documenting. `noPhase` instead of `none` because
+    // the field gets matched as an Optional (from a failable rawValue init) and
+    // `.none` would shadow `Optional.none` inside the switch.
+    private enum ScrollPhase: Int64 {
+        case noPhase = 0
+        case began = 1
+        case changed = 2
+        case ended = 4
+        case cancelled = 8
+        case mayBegin = 128
+    }
+
+    // Raw values of CGEvent's kCGScrollWheelEventMomentumPhase field.
+    private enum MomentumPhase: Int64 {
+        case noPhase = 0
+        case began = 1
+        case changed = 2
+        case ended = 3
+    }
+
     private static let physicalClickDedupWindow: TimeInterval = 0.5
     private static let physicalDoubleClickWindow: TimeInterval = NSEvent.doubleClickInterval
     private static let middleMouseButtonNumber = Int64(CGMouseButton.center.rawValue)
@@ -79,6 +119,7 @@ final class ScrollSuppressor: @unchecked Sendable {
     private var _lastPhysicalClickAtByFingerCount: [Int: TimeInterval] = [:]
     private var _pendingPhysicalClicksByFingerCount: [Int: PendingPhysicalClick] = [:]
     private var _physicalClickHandler: PhysicalClickHandler?
+    private var _tapRunLoop: CFRunLoop?
 
     private let clickScheduler: any PhysicalClickScheduling
 
@@ -130,6 +171,18 @@ final class ScrollSuppressor: @unchecked Sendable {
     private var runLoopSource: CFRunLoopSource?
     private var tapThread: Thread?
 
+    private func setTapRunLoop(_ runLoop: CFRunLoop?) {
+        os_unfair_lock_lock(&_lock)
+        _tapRunLoop = runLoop
+        os_unfair_lock_unlock(&_lock)
+    }
+
+    private func tapRunLoop() -> CFRunLoop? {
+        os_unfair_lock_lock(&_lock)
+        defer { os_unfair_lock_unlock(&_lock) }
+        return _tapRunLoop
+    }
+
     func start() {
         guard eventTap == nil else { return }
 
@@ -160,12 +213,18 @@ final class ScrollSuppressor: @unchecked Sendable {
 
         runLoopSource = source
 
-        // Run the tap on a dedicated thread so it doesn't block the main thread
+        // Run the tap on a dedicated thread so it doesn't block the main thread.
+        // The thread stores its CFRunLoop on self before entering CFRunLoopRun so
+        // stop() can wake it deterministically and let it exit cleanly.
         let thread = Thread { [weak self] in
             guard let self, let source = self.runLoopSource, let tap = self.eventTap else { return }
-            CFRunLoopAddSource(CFRunLoopGetCurrent(), source, .commonModes)
+            let runLoop = CFRunLoopGetCurrent()
+            self.setTapRunLoop(runLoop)
+            CFRunLoopAddSource(runLoop, source, .commonModes)
             CGEvent.tapEnable(tap: tap, enable: true)
             CFRunLoopRun()
+            CFRunLoopRemoveSource(runLoop, source, .commonModes)
+            self.setTapRunLoop(nil)
         }
         thread.name = "com.padium.scroll-suppressor"
         thread.qualityOfService = .userInteractive
@@ -179,13 +238,8 @@ final class ScrollSuppressor: @unchecked Sendable {
         if let tap = eventTap {
             CGEvent.tapEnable(tap: tap, enable: false)
         }
-        if runLoopSource != nil {
-            // Signal the run loop on the tap thread to stop
-            if let thread = tapThread {
-                CFRunLoopStop(CFRunLoopGetMain()) // fallback
-                // The thread's run loop will exit when the source is removed
-                _ = thread
-            }
+        if let runLoop = tapRunLoop() {
+            CFRunLoopStop(runLoop)
         }
         eventTap = nil
         runLoopSource = nil
@@ -271,32 +325,28 @@ final class ScrollSuppressor: @unchecked Sendable {
         // After fingers lift, only suppress leftover momentum from the 3-finger swipe.
         // Any NEW scroll sequence (began/mayBegin) must pass through immediately.
         if _suppressMomentum {
-            let momentumPhase = event.getIntegerValueField(.scrollWheelEventMomentumPhase)
-            // momentumPhase: 0 = none, 1 = began, 2 = changed, 3 = ended
-            if momentumPhase != 0 {
-                if momentumPhase == 3 {
+            let momentumPhase = MomentumPhase(rawValue: event.getIntegerValueField(.scrollWheelEventMomentumPhase))
+            if let momentumPhase, momentumPhase != .noPhase {
+                if momentumPhase == .ended {
                     _suppressMomentum = false
                 }
                 return true
             }
 
-            let scrollPhase = event.getIntegerValueField(.scrollWheelEventScrollPhase)
-            // scrollPhase: 1 = began, 2 = changed, 4 = ended, 8 = cancelled, 128 = mayBegin
-
-            // New scroll sequence from the user (2-finger) — stop suppressing immediately.
-            if scrollPhase == 1 || scrollPhase == 128 {
+            let scrollPhase = ScrollPhase(rawValue: event.getIntegerValueField(.scrollWheelEventScrollPhase))
+            switch scrollPhase {
+            case .began, .mayBegin:
+                // New scroll sequence from the user (2-finger) — stop suppressing immediately.
                 _suppressMomentum = false
                 return false
-            }
-
-            // End of the old scroll sequence or a discrete (legacy) event — clear and pass.
-            if scrollPhase == 4 || scrollPhase == 8 || scrollPhase == 0 {
+            case .noPhase, .ended, .cancelled:
+                // End of the old scroll sequence or a discrete (legacy) event — clear and pass.
                 _suppressMomentum = false
                 return false
+            case .changed, nil:
+                // Continuation of the old suppressed sequence, or an unknown raw value — keep suppressing.
+                return true
             }
-
-            // scrollPhase == 2 (changed) from the old sequence — still suppress.
-            return true
         }
 
         return false
