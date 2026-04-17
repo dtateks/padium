@@ -1,8 +1,8 @@
 # Padium — Agent Memory
 
-**Updated:** 2026-04-18 00:00
-**Commit:** 0e0c074
-**Branch:** unknown
+**Updated:** 2026-04-18 18:18
+**Commit:** 861c705
+**Branch:** main
 
 ## Project Overview
 macOS menu bar utility (Swift 5.9+, SwiftUI, Xcode). Trackpad swipe/tap/click gestures → keyboard shortcuts.
@@ -24,14 +24,21 @@ Bundle ID: `com.padium`, version 0.1.0. LSUIElement=true (no Dock icon).
 - `scripts/install-hooks.sh` enables the local pre-push release fast lane by setting `git config --local core.hooksPath .githooks`, so Git runs the version-controlled hook directly from `.githooks/pre-push`
 - Builds unsigned, replaces `/Applications/Padium.app` by default (or `$PADIUM_INSTALL_DIR`) by moving the built app into place, signs once with a stable Apple Development/Mac Development identity, then opens the installed copy.
 - Stable install path + stable signing identity avoids repeated Accessibility re-grants from changing signatures.
-- Launch without Accessibility permission immediately prompts, then terminates; relaunch after granting permission.
-- `PadiumApp` skips that launch prompt+quit path under XCTest so host-app tests can run.
+- Launch path: requires **output access** (Accessibility + Post Event) before enabling output. Missing output access prompts and sets a terminate callback; relaunch after grant.
+- `PadiumApp` skips that launch prompt+quit path under XCTest so host-app tests can execute.
+- Missing Input Monitoring degrades runtime but does not stop touch-only gesture runtime.
+- `PadiumApp.applicationDidBecomeActive(_:)` refreshes permissions/runtime state on activation.
 - After re-sign, `tccutil reset Accessibility com.padium` only if permissions are stale.
-- Requires granting Accessibility permission in System Settings.
+- Input Monitoring and Post Event are requested by capability when missing.
 - App only disables macOS system trackpad gestures for Padium slots that currently have configured shortcuts; unbound slots leave the original macOS gestures enabled. `SystemGestureManager` persists a backup to UserDefaults so crash recovery can restore on next launch
 - `SystemGestureManager` also auto-suppresses Smart Zoom via `TrackpadTwoFingerDoubleTapGesture` when the configured 2-finger double-tap slot is in use
 - `SystemGestureManager` only disables Dock gesture keys when all enabled vertical system gestures are being suppressed; partial vertical suppression leaves the other finger-count variant enabled
 - `ScrollSuppressor` uses a CGEventTap to consume scroll wheel events while 3+ fingers are active on the trackpad, preventing 2-finger scroll from firing during 3-finger gestures; it also routes configured physical 3/4-finger click and double-click gestures through `AppState` and suppresses same-sequence touch taps so physical clicks take precedence
+
+## Runtime Readiness
+- `AppState` runs `GestureEngine` and `ScrollSuppressor` as independent runtimes.
+- Touch and physical-click runtimes can run independently; one can be degraded while the other remains active.
+- Missing Output access disables the whole runtime; touch runtime can stay active while Input Monitoring is missing.
 
 ## Test
 - `xcodebuild -project Padium.xcodeproj -scheme Padium test`
@@ -45,7 +52,7 @@ PadiumApp (@main)
 │   ├─ PermissionsView (Tab 1) — Accessibility status + System Settings link
 │   └─ SettingsView (Tab 2) — KeyboardShortcuts.Recorder per slot
 └─ AppState (@Observable, orchestration boundary)
-    ├─ PermissionCoordinator — AXIsProcessTrusted polling + prompt
+    ├─ PermissionCoordinator — capability polling: Accessibility, Input Monitoring, Post Event
     ├─ GestureEngine — AsyncStream pipeline: source → classifier → filtered events
     │   ├─ OMSGestureSource — OpenMultitouchSupport bridge
     │   └─ GestureClassifier — swipe classification + tap travel helper
@@ -61,7 +68,11 @@ Physical click path: `ScrollSuppressor` CGEventTap detects configured 3/4-finger
 - `AppState` is the ONLY orchestration boundary — views toggle state, never run side effects
 - `GestureEngine.start()` is non-throwing; exposes failure via `lastStartError` — callers MUST inspect on `false` return
 - `GestureEngine`/`OMSGestureSource` are restart-safe: AsyncStream replaced on each `start()` call
-- Launch flow: `PermissionChecking`/`PermissionCoordinator` owns the permission prompt; missing Accessibility permission prompts immediately and the app exits until relaunched after approval.
+- Touch runtime and physical-click runtime start/stop independently; runtime failure in one path marks `RuntimeStatus.degraded` without hard-killing the other.
+- Launch flow: `PermissionChecking`/`PermissionCoordinator` owns runtime capability checks; `permissionState`, `inputMonitoringState`, and `postEventState` are independent.
+- Output access = Accessibility + Post Event; missing either makes runtime status `.permissionsRequired`.
+- Input Monitoring gap makes runtime status `.degraded`.
+- `AppState` runtime status enum: `.checking`, `.permissionsRequired`, `.degraded`, `.active`.
 - XCTest launch path bypasses that prompt+quit behavior so host-app tests can execute.
 - `GestureEngine` tracks a peak finger count per candidate and upgrades (re-anchors origin + startedAt) when a higher count appears; it never downgrades on lift transitions, so a 4-finger swipe whose lift drops through 3/2 fingers cannot misfire as a smaller-finger tap. Swipe classification is gated by a wall-clock settle window (~80 ms) ONLY when the peak is below the highest configured finger count — this is the libinput Pattern B "wait for additional fingers" semantics, sized for Padium's bounded peak. When peak equals max configured, commit happens on motion alone (no wait). Time-based via `scheduler.now`, so behavior is independent of OMS frame rate. After emission it suppresses duplicates until a lift frame
 - `GestureClassifier` requires stable touch identifiers, dominant-axis commitment, and per-finger direction agreement; vertical swipes tolerate lateral drift while the dominant axis stays vertical
@@ -70,6 +81,7 @@ Physical click path: `ScrollSuppressor` CGEventTap detects configured 3/4-finger
 - Legacy 3/4 click slots keep their historical raw values (`threeFingerTap`, `threeFingerDoubleTap`, `fourFingerTap`, `fourFingerDoubleTap`) for persisted shortcut/action-kind compatibility; 3/4-finger touch double-tap slots use distinct raw values (`threeFingerTouchDoubleTap`, `fourFingerTouchDoubleTap`)
 - Shared sensitivity changes apply immediately without restarting the runtime for swipes and touch taps; `GestureClassifier` reads the current swipe threshold live and tap travel tolerance uses the same boosted sensitivity curve. UI sensitivity applies a +20 point base boost before threshold mapping, so default 50% behaves like the previous 70% calibration
 - `AppState` refreshes live runtime/config state from `UserDefaults` changes; shortcut-binding changes must refresh conflict state and gesture routing together
+- `AppState` also observes `KeyboardShortcuts_shortcutByNameDidChange` to refresh runtime active slots/conflicts immediately after shortcut assign/clear (no relaunch)
 - `ShortcutRegistry.name(for:)` is the SINGLE source of truth for slot→`KeyboardShortcuts.Name` mapping — no ad-hoc Name creation elsewhere
 - Settings window: app launch starts permission polling immediately; app activation/reopen focuses the existing settings window; `onDisappear` resets `isSettingsPresented` to `false`
 - Permissions revoked while running → `refreshPermissions()` stops the runtime
@@ -97,6 +109,7 @@ Physical click path: `ScrollSuppressor` CGEventTap detects configured 3/4-finger
 | Task | Location |
 |------|----------|
 | App entry / scene setup | `Padium/PadiumApp.swift` |
+| Activation permission refresh | `Padium/PadiumApp.swift` |
 | Runtime orchestration | `Padium/AppState.swift` |
 | Gesture detection pipeline | `Padium/GestureEngine.swift` → `GestureClassifier.swift` |
 | Multitouch hardware bridge | `Padium/OMSGestureSource.swift` |

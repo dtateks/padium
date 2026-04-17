@@ -1,11 +1,15 @@
 <!-- Scoped to Padium/ source directory. Root AGENTS.md covers architecture, contracts, and conventions. -->
 
+**Updated:** 2026-04-18 18:18
+**Commit:** 861c705
+**Branch:** main
+
 # Source Files
 
 | File | Role | Key Detail |
 |------|------|------------|
 | PadiumApp.swift | @main entry | Window(id: "settings"), `SettingsContentView` owns TabView |
-| AppState.swift | Orchestration | `@Observable`, owns runtime Task, injects shortcut/middle-click emitters, routes physical 3/4-finger click events from `ScrollSuppressor`, and suppresses same-sequence touch taps |
+| AppState.swift | Orchestration | `@Observable`; owns separate touch (`GestureEngine`) and physical-click (`ScrollSuppressor`) runtimes; observes shortcut config changes from both `UserDefaults` and `KeyboardShortcuts_shortcutByNameDidChange` |
 | GestureEngine.swift | Pipeline | Tracks stable candidates by finger count + touch IDs, arbitrates tap vs double-tap on lift, emits once, suppresses duplicates until lift |
 | GestureClassifier.swift | Classification | Stable touch IDs, dominant-axis commitment, per-finger direction agreement, lateral-drift tolerance on vertical swipes |
 | GestureSource.swift | Protocol + types | `GestureSource` protocol, `TouchPoint` struct, `OMSTouchState` enum — boundary above OMS |
@@ -14,7 +18,7 @@
 | OMSGestureSource.swift | Hardware bridge | `OMSManager.shared` → `AsyncStream<[TouchPoint]>`, `@unchecked Sendable` |
 | ShortcutEmitter.swift | Key posting | `CGEventShortcutSender` posts explicit modifier transitions + key events via `.cghidEventTap` |
 | ShortcutRegistry.swift | Name mapping | `"gesture.\(slot.rawValue)"` pattern — single source of truth |
-| PermissionCoordinator.swift | Permissions | `PermissionState` enum (.checking/.granted/.denied), `SystemPermissionChecker` |
+| PermissionCoordinator.swift | Permissions | `PermissionState` + `permissionState/inputMonitoringState/postEventState`, `requestMissingPermissions()` |
 | PreemptionController.swift | Conflict detection | Reads `com.apple.AppleMultitouchTrackpad` domain, filters conflicts down to currently configured GestureSlots, `openTrackpadSettings()` deep-links to System Settings |
 | SystemGestureManager.swift | Gesture suppression | `suppress(conflictingSettings:allSettings:)` selectively disables matching macOS gesture prefs via `defaults write` + `killall Dock`; Dock keys disable only when all enabled vertical gestures are suppressed; `restore()` writes back originals; backup in UserDefaults for crash recovery |
 | ScrollSuppressor.swift | Scroll + click suppression | CGEventTap on `.scrollWheel`, `.leftMouseDown`, and `.leftMouseUp`; consumes scroll events while 3+ fingers active, emits configured physical 3/4-finger click+dbl-click gesture events to `AppState`, suppresses handled left-click pairs, and blocks same-sequence touch taps. Exposes two narrow protocols — `PhysicalClickCoordinating` (start/stop/handler/touch-tap gate) for `AppState`, `MultitouchStateSink` (set-only finger count + active flag) for `GestureEngine` — so collaborators depend on behaviour instead of the shared singleton |
@@ -29,9 +33,11 @@
 - Palm rejection is geometric only: `GestureClassifier.stableActiveContacts` rejects contacts whose aspect-corrected pairwise spread exceeds one-hand reach — 2-finger 0.70, 3-finger 1.00, 4+ unchecked — catching two-palm-at-corners artefacts without any keyboard-activity heuristic
 - `GestureClassifier` tolerates lateral drift on vertical swipes while preserving dominant-axis commitment and per-finger agreement
 - `GestureEngine` tracks a peak finger count per candidate: it upgrades and re-anchors `originContacts`/`startedAt` when a higher count appears and preserves the candidate (no downgrade) when fewer fingers are active during landing/lift transitions. Swipe classification is gated by a wall-clock settle window (`peakUpgradeSettleWindow`, 80 ms via `scheduler.now`) ONLY when a higher finger count is still configured (i.e. an upgrade is still possible). When the peak already equals the highest configured finger count there is no settle wait — commit happens on motion alone. This is the libinput Pattern B (`UNKNOWN [hold_timer] → committed`) sized for Padium's bounded peak (max 4 fingers) and the empirical 20–60 ms multi-finger landing spread on macOS trackpads. Time-based, not frame-based, so behavior is independent of OMS frame rate (90–120 Hz across hardware). `handleLift` always evaluates tap recognition against the peak — a 4-finger swipe whose lift drops through 3/2 fingers can never register a 2/3-finger tap. Frames after a committed gesture are still ignored until a lift frame clears the candidate.
+- `PermissionCoordinator` tracking includes `PermissionState` for Accessibility, listen-event (Input Monitoring), and post-event access separately
 - `PermissionCoordinator` polling is owned by `AppState` from app launch so permission revocation can stop the runtime even while settings is closed
-- Launch without Accessibility permission immediately prompts, then terminates; `PadiumApp` bypasses that path under XCTest so host-app tests can run
-- `AppState` refreshes active slots and live runtime/config state from `UserDefaults` changes; shortcut-binding changes must refresh conflict state and gesture routing together
+- `AppState` distinguishes `isTouchRuntimeActive`, `isPhysicalClickRuntimeActive`, `hasInputMonitoringAccess`, and `hasOutputAccess` for UI and runtime status
+- `AppState` listens to `KeyboardShortcuts_shortcutByNameDidChange` and `UserDefaults.didChangeNotification`; on any change, active slots/conflicts refresh immediately and runtimes adapt without relaunch
+- Runtime can be `.degraded` when either pipeline fails or Input Monitoring is missing; failures are isolated so one pipeline can remain active while the other degrades
 - App activation/reopen explicitly focuses the existing settings window rather than spawning duplicates
 - `AppState.setAppInteractionActive(_:)` marks Padium's own menu/settings surfaces as UI-interaction mode so `ScrollSuppressor` passes physical left-click events through while the user is interacting with Padium itself
 - `PreemptionController.conflictingSlots(for:)` returns only the currently configured Padium slots that still conflict with enabled system gestures; `AppState` refreshes this after permission and shortcut-binding changes
