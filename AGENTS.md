@@ -79,7 +79,8 @@ Physical click path: `ScrollSuppressor` CGEventTap detects configured 3/4-finger
 ## Coding Conventions
 - `@MainActor` on all UI-bound and state classes
 - Views are thin: render state only, no side-effect orchestration
-- Protocols for DI boundaries: `GestureSource`, `GestureRuntimeControlling`, `ShortcutEmitting`, `PermissionChecking`
+- Protocols for DI boundaries: `GestureSource`, `GestureRuntimeControlling`, `ShortcutEmitting`, `MiddleClickEmitting`, `PreemptionControlling`, `SystemGestureManaging`, `PhysicalClickCoordinating`, `MultitouchStateSink`, `PermissionChecking`
+- `AppState` takes `scrollSuppressor: (any PhysicalClickCoordinating)? = nil`; `GestureEngine` takes `multitouchSink: (any MultitouchStateSink)? = nil`. Both default to `ScrollSuppressor.shared`, so production keeps the singleton while tests can isolate the click/touch-state surface
 - `@discardableResult` on `start()`/`emitConfiguredShortcut()` methods
 - Logging via `PadiumLogger` (OSLog): categories `gesture`, `shortcut`, `permission`
 - Classifier thresholds are empirically derived — do NOT change without new evidence; swipe sensitivity and tap/double-tap thresholds are intentionally separate
