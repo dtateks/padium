@@ -10,7 +10,7 @@
 - Frame helpers like `makeSwipeFrames(fingerCount:startX:startY:endX:endY:)` and tap/double-tap builders build `[[TouchPoint]]` for classifier/engine tests
 - Async pipeline tests: yield frames into stub source → `Task.yield()` to flush → assert on collected events
 - NEVER `Task.sleep` — use `continuation.yield()` + `Task.yield()` for deterministic sequencing
-- Gesture regression coverage must include stable-ID commit, dominant-axis rejection, lateral-drift tolerance on vertical swipes, per-finger agreement, swipe threshold rejection, duplicate suppression until lift, deterministic 1-finger/2-finger double-tap plus dedicated 3-finger/4-finger touch tap + double-tap timing, and touch-only engine emission; config-mutating tests preserve and restore user gesture config
+- Gesture regression coverage must include stable-ID commit, dominant-axis rejection, lateral-drift tolerance on vertical swipes, per-finger agreement, swipe threshold rejection, duplicate suppression until lift, deterministic 1-finger/2-finger double-tap plus dedicated 3-finger/4-finger touch tap + double-tap timing, hand-spread rejection of palm-at-corners artefacts, keyboard-typing suppression of touch taps (with parity that swipes remain unaffected), and touch-only engine emission; config-mutating tests preserve and restore user gesture config
 - Permission launch coverage must include immediate prompt+quit on missing Accessibility permission and XCTest bypass of that path in `PadiumApp`
 
 # Coverage Map

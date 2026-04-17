@@ -31,6 +31,7 @@ Bundle ID: `com.padium`, version 0.1.0. LSUIElement=true (no Dock icon).
 - `SystemGestureManager` also auto-suppresses Smart Zoom via `TrackpadTwoFingerDoubleTapGesture` when the configured 2-finger double-tap slot is in use
 - `SystemGestureManager` only disables Dock gesture keys when all enabled vertical system gestures are being suppressed; partial vertical suppression leaves the other finger-count variant enabled
 - `ScrollSuppressor` uses a CGEventTap to consume scroll wheel events while 3+ fingers are active on the trackpad, preventing 2-finger scroll from firing during 3-finger gestures; it also routes configured physical 3/4-finger click and double-click gestures through `AppState` and suppresses same-sequence touch taps so physical clicks take precedence
+- `KeyboardActivityMonitor` observes global+local `NSEvent.keyDown` passively (no event consumption, no extra permission beyond the Accessibility grant Padium already holds) and exposes a `wasKeyPressedRecently(within:)` signal. `GestureEngine.handleLift` rejects touch taps within a 200 ms post-keystroke window — swipes are unaffected. This is Padium's palm-during-typing defense: device-agnostic, size-invariant
 
 ## Test
 - `xcodebuild -project Padium.xcodeproj -scheme Padium test`
@@ -65,6 +66,7 @@ Physical click path: `ScrollSuppressor` CGEventTap detects configured 3/4-finger
 - XCTest launch path bypasses that prompt+quit behavior so host-app tests can execute.
 - `GestureEngine` tracks a peak finger count per candidate and upgrades (re-anchors origin + startedAt) when a higher count appears; it never downgrades on lift transitions, so a 4-finger swipe whose lift drops through 3/2 fingers cannot misfire as a smaller-finger tap. Swipe classification is gated by a wall-clock settle window (~80 ms) ONLY when the peak is below the highest configured finger count — this is the libinput Pattern B "wait for additional fingers" semantics, sized for Padium's bounded peak. When peak equals max configured, commit happens on motion alone (no wait). Time-based via `scheduler.now`, so behavior is independent of OMS frame rate. After emission it suppresses duplicates until a lift frame
 - `GestureClassifier` requires stable touch identifiers, dominant-axis commitment, and per-finger direction agreement; vertical swipes tolerate lateral drift while the dominant axis stays vertical
+- `GestureClassifier.stableActiveContacts` enforces a per-finger-count hand-spread gate (aspect-corrected pairwise distance): 2 fingers ≤ 0.70, 3 fingers ≤ 1.00, 4+ unchecked. Rejects two-handed palm artefacts (e.g. palms on opposite trackpad corners while typing) that slip past the majorAxis palm filter, without reducing sensitivity for single-hand gestures on any trackpad size
 - `GestureEngine` is touch-only: it emits swipes plus double-tap slots (1/2-finger double-tap and 3/4-finger double-tap) and never emits physical click/double-click slots; there are no single touch-tap slots — only double-tap
 - Legacy 3/4 click slots keep their historical raw values (`threeFingerTap`, `threeFingerDoubleTap`, `fourFingerTap`, `fourFingerDoubleTap`) for persisted shortcut/action-kind compatibility; 3/4-finger touch double-tap slots use distinct raw values (`threeFingerTouchDoubleTap`, `fourFingerTouchDoubleTap`)
 - Shared sensitivity changes apply immediately without restarting the runtime for swipes and touch taps; `GestureClassifier` reads the current swipe threshold live and tap travel tolerance uses the same boosted sensitivity curve. UI sensitivity applies a +20 point base boost before threshold mapping, so default 50% behaves like the previous 70% calibration
@@ -79,8 +81,8 @@ Physical click path: `ScrollSuppressor` CGEventTap detects configured 3/4-finger
 ## Coding Conventions
 - `@MainActor` on all UI-bound and state classes
 - Views are thin: render state only, no side-effect orchestration
-- Protocols for DI boundaries: `GestureSource`, `GestureRuntimeControlling`, `ShortcutEmitting`, `MiddleClickEmitting`, `PreemptionControlling`, `SystemGestureManaging`, `PhysicalClickCoordinating`, `MultitouchStateSink`, `PermissionChecking`
-- `AppState` takes `scrollSuppressor: (any PhysicalClickCoordinating)? = nil`; `GestureEngine` takes `multitouchSink: (any MultitouchStateSink)? = nil`. Both default to `ScrollSuppressor.shared`, so production keeps the singleton while tests can isolate the click/touch-state surface
+- Protocols for DI boundaries: `GestureSource`, `GestureRuntimeControlling`, `ShortcutEmitting`, `MiddleClickEmitting`, `PreemptionControlling`, `SystemGestureManaging`, `PhysicalClickCoordinating`, `MultitouchStateSink`, `PermissionChecking`, `KeyboardActivitySensing`, `KeyboardActivityMonitoring`
+- `AppState` takes `scrollSuppressor: (any PhysicalClickCoordinating)? = nil` and `keyboardActivityMonitor: (any KeyboardActivityMonitoring)? = nil`; `GestureEngine` takes `multitouchSink: (any MultitouchStateSink)? = nil` and `keyboardActivity: (any KeyboardActivitySensing)? = nil`. Defaults point at `ScrollSuppressor.shared` and `KeyboardActivityMonitor.shared` so production keeps the singletons while tests can isolate the click/touch-state/keyboard surfaces
 - `@discardableResult` on `start()`/`emitConfiguredShortcut()` methods
 - Logging via `PadiumLogger` (OSLog): categories `gesture`, `shortcut`, `permission`
 - Classifier thresholds are empirically derived — do NOT change without new evidence; swipe sensitivity and tap/double-tap thresholds are intentionally separate
@@ -100,6 +102,7 @@ Physical click path: `ScrollSuppressor` CGEventTap detects configured 3/4-finger
 | Gesture detection pipeline | `Padium/GestureEngine.swift` → `GestureClassifier.swift` |
 | Multitouch hardware bridge | `Padium/OMSGestureSource.swift` |
 | Shortcut emission | `Padium/ShortcutEmitter.swift` |
+| Palm-during-typing defense | `Padium/KeyboardActivityMonitor.swift` |
 | Permission logic | `Padium/PermissionCoordinator.swift` |
 | System gesture policy | `Padium/PreemptionController.swift` |
 | Slot↔shortcut mapping | `Padium/ShortcutRegistry.swift` |
