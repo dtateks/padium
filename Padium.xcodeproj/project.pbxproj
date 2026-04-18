@@ -12,7 +12,7 @@
 		AA0101010103 /* GestureSlot.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0201010103 /* GestureSlot.swift */; };
 		AA0101010104 /* GestureEvent.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0201010104 /* GestureEvent.swift */; };
 		AA0101010105 /* GestureSource.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0201010105 /* GestureSource.swift */; };
-		AA0101010106 /* OMSGestureSource.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0201010106 /* OMSGestureSource.swift */; };
+		AA0101010106 /* MultitouchGestureSource.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0201010106 /* MultitouchGestureSource.swift */; };
 		AA0101010107 /* GestureClassifier.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0201010107 /* GestureClassifier.swift */; };
 		AA0101010108 /* GestureEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0201010108 /* GestureEngine.swift */; };
 		AA0101010109 /* ShortcutRegistry.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0201010109 /* ShortcutRegistry.swift */; };
@@ -24,6 +24,7 @@
 		AA010101010F /* PreemptionController.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA020101010F /* PreemptionController.swift */; };
 		AA0101010111 /* SystemGestureManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0201010112 /* SystemGestureManager.swift */; };
 		AA0101010113 /* ScrollSuppressor.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0201010114 /* ScrollSuppressor.swift */; };
+		AA0101010116 /* MultitouchBridge.m in Sources */ = {isa = PBXBuildFile; fileRef = AA0201010117 /* MultitouchBridge.m */; };
 		AA0101010115 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = AA0201010115 /* Assets.xcassets */; };
 		AA0101010110 /* Logger.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0201010110 /* Logger.swift */; };
 		AA0101020201 /* GestureClassifierTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0301020201 /* GestureClassifierTests.swift */; };
@@ -31,7 +32,6 @@
 		AA0101020203 /* ShortcutRegistryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0301020203 /* ShortcutRegistryTests.swift */; };
 		AA0101020204 /* ShortcutEmitterTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0301020204 /* ShortcutEmitterTests.swift */; };
 		AA0101020205 /* PermissionCoordinatorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0301020205 /* PermissionCoordinatorTests.swift */; };
-		AA0101030301 /* OpenMultitouchSupport in Frameworks */ = {isa = PBXBuildFile; productRef = AA0701030301 /* OpenMultitouchSupport */; };
 		AA0101030302 /* KeyboardShortcuts in Frameworks */ = {isa = PBXBuildFile; productRef = AA0701030302 /* KeyboardShortcuts */; };
 		AA0101030303 /* KeyboardShortcuts in Frameworks */ = {isa = PBXBuildFile; productRef = AA0701030303 /* KeyboardShortcuts */; };
 /* End PBXBuildFile section */
@@ -42,7 +42,7 @@
 		AA0201010103 /* GestureSlot.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GestureSlot.swift; sourceTree = "<group>"; };
 		AA0201010104 /* GestureEvent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GestureEvent.swift; sourceTree = "<group>"; };
 		AA0201010105 /* GestureSource.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GestureSource.swift; sourceTree = "<group>"; };
-		AA0201010106 /* OMSGestureSource.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OMSGestureSource.swift; sourceTree = "<group>"; };
+		AA0201010106 /* MultitouchGestureSource.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MultitouchGestureSource.swift; sourceTree = "<group>"; };
 		AA0201010107 /* GestureClassifier.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GestureClassifier.swift; sourceTree = "<group>"; };
 		AA0201010108 /* GestureEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GestureEngine.swift; sourceTree = "<group>"; };
 		AA0201010109 /* ShortcutRegistry.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShortcutRegistry.swift; sourceTree = "<group>"; };
@@ -54,6 +54,9 @@
 		AA020101010F /* PreemptionController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PreemptionController.swift; sourceTree = "<group>"; };
 		AA0201010112 /* SystemGestureManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SystemGestureManager.swift; sourceTree = "<group>"; };
 		AA0201010114 /* ScrollSuppressor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScrollSuppressor.swift; sourceTree = "<group>"; };
+		AA0201010116 /* MultitouchBridge.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = MultitouchBridge.h; sourceTree = "<group>"; };
+		AA0201010117 /* MultitouchBridge.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = MultitouchBridge.m; sourceTree = "<group>"; };
+		AA0201010118 /* Padium-Bridging-Header.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = "Padium-Bridging-Header.h"; sourceTree = "<group>"; };
 		AA0201010115 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		AA0201010110 /* Logger.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Logger.swift; sourceTree = "<group>"; };
 		AA0201010111 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
@@ -71,7 +74,6 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				AA0101030301 /* OpenMultitouchSupport in Frameworks */,
 				AA0101030302 /* KeyboardShortcuts in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -106,7 +108,10 @@
 				AA0201010103 /* GestureSlot.swift */,
 				AA0201010104 /* GestureEvent.swift */,
 				AA0201010105 /* GestureSource.swift */,
-				AA0201010106 /* OMSGestureSource.swift */,
+				AA0201010106 /* MultitouchGestureSource.swift */,
+				AA0201010116 /* MultitouchBridge.h */,
+				AA0201010117 /* MultitouchBridge.m */,
+				AA0201010118 /* Padium-Bridging-Header.h */,
 				AA0201010107 /* GestureClassifier.swift */,
 				AA0201010108 /* GestureEngine.swift */,
 				AA0201010109 /* ShortcutRegistry.swift */,
@@ -163,7 +168,6 @@
 			);
 			name = Padium;
 			packageProductDependencies = (
-				AA0701030301 /* OpenMultitouchSupport */,
 				AA0701030302 /* KeyboardShortcuts */,
 			);
 			productName = Padium;
@@ -219,7 +223,6 @@
 			);
 			mainGroup = AA0600000000;
 			packageReferences = (
-				AA0D01010101 /* XCRemoteSwiftPackageReference "OpenMultitouchSupport" */,
 				AA0D02020202 /* XCRemoteSwiftPackageReference "KeyboardShortcuts" */,
 			);
 			productRefGroup = AA0603030303 /* Products */;
@@ -253,7 +256,8 @@
 				AA0101010103 /* GestureSlot.swift in Sources */,
 				AA0101010104 /* GestureEvent.swift in Sources */,
 				AA0101010105 /* GestureSource.swift in Sources */,
-				AA0101010106 /* OMSGestureSource.swift in Sources */,
+				AA0101010106 /* MultitouchGestureSource.swift in Sources */,
+				AA0101010116 /* MultitouchBridge.m in Sources */,
 				AA0101010107 /* GestureClassifier.swift in Sources */,
 				AA0101010108 /* GestureEngine.swift in Sources */,
 				AA0101010109 /* ShortcutRegistry.swift in Sources */,
@@ -330,6 +334,7 @@
 				);
 				PRODUCT_BUNDLE_IDENTIFIER = com.padium;
 				PRODUCT_NAME = Padium;
+				SWIFT_OBJC_BRIDGING_HEADER = "Padium/Padium-Bridging-Header.h";
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_STRICT_CONCURRENCY = complete;
 				SWIFT_VERSION = 6.0;
@@ -364,6 +369,7 @@
 				);
 				PRODUCT_BUNDLE_IDENTIFIER = com.padium;
 				PRODUCT_NAME = Padium;
+				SWIFT_OBJC_BRIDGING_HEADER = "Padium/Padium-Bridging-Header.h";
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_STRICT_CONCURRENCY = complete;
 				SWIFT_VERSION = 6.0;
@@ -526,14 +532,6 @@
 /* End XCConfigurationList section */
 
 /* Begin XCRemoteSwiftPackageReference section */
-		AA0D01010101 /* XCRemoteSwiftPackageReference "OpenMultitouchSupport" */ = {
-			isa = XCRemoteSwiftPackageReference;
-			repositoryURL = "https://github.com/Kyome22/OpenMultitouchSupport";
-			requirement = {
-				kind = upToNextMajorVersion;
-				minimumVersion = 3.0.3;
-			};
-		};
 		AA0D02020202 /* XCRemoteSwiftPackageReference "KeyboardShortcuts" */ = {
 			isa = XCRemoteSwiftPackageReference;
 			repositoryURL = "https://github.com/sindresorhus/KeyboardShortcuts";
@@ -545,11 +543,6 @@
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
-		AA0701030301 /* OpenMultitouchSupport */ = {
-			isa = XCSwiftPackageProductDependency;
-			package = AA0D01010101 /* XCRemoteSwiftPackageReference "OpenMultitouchSupport" */;
-			productName = OpenMultitouchSupport;
-		};
 		AA0701030302 /* KeyboardShortcuts */ = {
 			isa = XCSwiftPackageProductDependency;
 			package = AA0D02020202 /* XCRemoteSwiftPackageReference "KeyboardShortcuts" */;

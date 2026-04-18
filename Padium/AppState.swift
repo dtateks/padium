@@ -179,7 +179,7 @@ final class AppState {
             self.gestureEngine = gestureEngine
         } else {
             self.gestureEngine = GestureEngine(
-                source: OMSGestureSource(),
+                source: MultitouchGestureSource(),
                 supportedSlots: Set(supportedGestureSlots)
             )
         }

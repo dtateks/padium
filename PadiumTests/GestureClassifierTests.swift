@@ -15,13 +15,13 @@ struct GestureClassifierTests {
 
     private func pt(
         id: Int = 1, x: Float = 0.5, y: Float = 0.5,
-        state: OMSTouchState = .touching, total: Float = 0.15, majorAxis: Float = 12.0
+        state: TouchState = .touching, total: Float = 0.15, majorAxis: Float = 12.0
     ) -> TouchPoint {
         TouchPoint(identifier: id, normalizedX: x, normalizedY: y,
                    pressure: 0.3, state: state, total: total, majorAxis: majorAxis)
     }
 
-    private func frame(_ count: Int, x: Float, y: Float, state: OMSTouchState = .touching,
+    private func frame(_ count: Int, x: Float, y: Float, state: TouchState = .touching,
                        total: Float = 0.15, majorAxis: Float = 12.0) -> [TouchPoint] {
         (0..<count).map { i in pt(id: i+1, x: x, y: y, state: state, total: total, majorAxis: majorAxis) }
     }

@@ -277,7 +277,7 @@ struct GestureClassifier: Sendable {
         point.majorAxis <= Self.palmMajorAxisThreshold
     }
 
-    private func isActiveState(_ state: OMSTouchState) -> Bool {
+    private func isActiveState(_ state: TouchState) -> Bool {
         switch state {
         case .starting, .making, .touching, .lingering, .breaking:
             return true
