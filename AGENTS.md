@@ -1,7 +1,7 @@
 # Padium — Agent Memory
 
-**Updated:** 2026-04-18 18:18
-**Commit:** 861c705
+**Updated:** 2026-04-18 10:22
+**Commit:** ad6a53e
 **Branch:** main
 
 ## Project Overview
@@ -12,7 +12,7 @@ Bundle ID: `com.padium`, version 0.1.0. LSUIElement=true (no Dock icon).
 
 ## Dependencies (SPM via Xcode)
 - `KeyboardShortcuts` 2.4.0 — shortcut recording UI + UserDefaults persistence
-- `OpenMultitouchSupport` 3.0.3 — private multitouch API bridge (OMSManager)
+- Local `MultitouchSupport` private-framework bridge (`Padium/MultitouchBridge.{h,m}`) — multi-device touch capture
 - Shared gesture sensitivity applies to swipes only; tap and double-tap gestures use fixed thresholds.
 
 ## Build & Run
@@ -54,27 +54,27 @@ PadiumApp (@main)
 └─ AppState (@Observable, orchestration boundary)
     ├─ PermissionCoordinator — capability polling: Accessibility, Input Monitoring, Post Event
     ├─ GestureEngine — AsyncStream pipeline: source → classifier → filtered events
-    │   ├─ OMSGestureSource — OpenMultitouchSupport bridge
+    │   ├─ MultitouchGestureSource — local multi-device MultitouchSupport bridge
     │   └─ GestureClassifier — swipe classification + tap travel helper
     └─ ShortcutEmitter — ShortcutRegistry lookup → CGEvent key-down/key-up post
 ```
 
 ## Runtime Pipeline
-Touch path: `OMSGestureSource` → touch frames → `GestureEngine` tracks a candidate only while finger count + touch IDs stay stable → `GestureClassifier.classifyIncremental()` for swipes or touch-tap/double-tap arbitration on lift → emits once, then ignores further frames until lift → `AppState` for-await loop → `ShortcutEmitter` → `CGEvent` post.
+Touch path: `MultitouchGestureSource` → touch frames → single active device until empty-frame release → `GestureEngine` tracks a candidate only while finger count + touch IDs stay stable → `GestureClassifier.classifyIncremental()` for swipes or touch-tap/double-tap arbitration on lift → emits once, then ignores further frames until lift → `AppState` for-await loop → `ShortcutEmitter` → `CGEvent` post.
 
 Physical click path: `ScrollSuppressor` CGEventTap detects configured 3/4-finger left-click sequences, suppresses handled original left-click pairs, emits click/double-click `GestureEvent`s to `AppState`, and only blocks same-sequence touch-tap events after Padium actually claimed that physical click path.
 
 ## Key Contracts
 - `AppState` is the ONLY orchestration boundary — views toggle state, never run side effects
 - `GestureEngine.start()` is non-throwing; exposes failure via `lastStartError` — callers MUST inspect on `false` return
-- `GestureEngine`/`OMSGestureSource` are restart-safe: AsyncStream replaced on each `start()` call
+- `GestureEngine`/`MultitouchGestureSource` are restart-safe: AsyncStream replaced on each `start()` call
 - Touch runtime and physical-click runtime start/stop independently; runtime failure in one path marks `RuntimeStatus.degraded` without hard-killing the other.
 - Launch flow: `PermissionChecking`/`PermissionCoordinator` owns runtime capability checks; `permissionState`, `inputMonitoringState`, and `postEventState` are independent.
 - Output access = Accessibility + Post Event; missing either makes runtime status `.permissionsRequired`.
 - Input Monitoring gap makes runtime status `.degraded`.
 - `AppState` runtime status enum: `.checking`, `.permissionsRequired`, `.degraded`, `.active`.
 - XCTest launch path bypasses that prompt+quit behavior so host-app tests can execute.
-- `GestureEngine` tracks a peak finger count per candidate and upgrades (re-anchors origin + startedAt) when a higher count appears; it never downgrades on lift transitions, so a 4-finger swipe whose lift drops through 3/2 fingers cannot misfire as a smaller-finger tap. Swipe classification is gated by a wall-clock settle window (~80 ms) ONLY when the peak is below the highest configured finger count — this is the libinput Pattern B "wait for additional fingers" semantics, sized for Padium's bounded peak. When peak equals max configured, commit happens on motion alone (no wait). Time-based via `scheduler.now`, so behavior is independent of OMS frame rate. After emission it suppresses duplicates until a lift frame
+- `GestureEngine` tracks a peak finger count per candidate and upgrades (re-anchors origin + startedAt) when a higher count appears; it never downgrades on lift transitions, so a 4-finger swipe whose lift drops through 3/2 fingers cannot misfire as a smaller-finger tap. Swipe classification is gated by a wall-clock settle window (~80 ms) ONLY when the peak is below the highest configured finger count — this is the libinput Pattern B "wait for additional fingers" semantics, sized for Padium's bounded peak. When peak equals max configured, commit happens on motion alone (no wait). Time-based via `scheduler.now`, so behavior is independent of frame timing. After emission it suppresses duplicates until a lift frame
 - `GestureClassifier` requires stable touch identifiers, dominant-axis commitment, and per-finger direction agreement; vertical swipes tolerate lateral drift while the dominant axis stays vertical
 - `GestureClassifier.stableActiveContacts` enforces a per-finger-count hand-spread gate (aspect-corrected pairwise distance): 2 fingers ≤ 0.70, 3 fingers ≤ 1.00, 4+ unchecked. Rejects two-handed palm artefacts (e.g. palms on opposite trackpad corners while typing) that slip past the majorAxis palm filter, without reducing sensitivity for single-hand gestures on any trackpad size
 - `GestureEngine` is touch-only: it emits swipes plus double-tap slots (1/2-finger double-tap and 3/4-finger double-tap) and never emits physical click/double-click slots; there are no single touch-tap slots — only double-tap
@@ -102,7 +102,7 @@ Physical click path: `ScrollSuppressor` CGEventTap detects configured 3/4-finger
 ## Anti-Patterns
 - NEVER create `KeyboardShortcuts.Name` outside `ShortcutRegistry`
 - NEVER use `Task.sleep` in tests — causes flaky non-determinism
-- NEVER rely on temporary print debugging in OMS plumbing; use `PadiumLogger.gesture`
+- NEVER rely on temporary print debugging in multitouch plumbing; use `PadiumLogger.gesture`
 - NEVER reintroduce flagged main-key pairs on `.cgAnnotatedSessionEventTap` for shortcut emission
 
 ## Where To Look
@@ -112,7 +112,7 @@ Physical click path: `ScrollSuppressor` CGEventTap detects configured 3/4-finger
 | Activation permission refresh | `Padium/PadiumApp.swift` |
 | Runtime orchestration | `Padium/AppState.swift` |
 | Gesture detection pipeline | `Padium/GestureEngine.swift` → `GestureClassifier.swift` |
-| Multitouch hardware bridge | `Padium/OMSGestureSource.swift` |
+| Multitouch hardware bridge | `Padium/MultitouchGestureSource.swift` + `Padium/MultitouchBridge.m` |
 | Shortcut emission | `Padium/ShortcutEmitter.swift` |
 | Permission logic | `Padium/PermissionCoordinator.swift` |
 | System gesture policy | `Padium/PreemptionController.swift` |

@@ -1,7 +1,7 @@
 <!-- Scoped to PadiumTests/ directory. Root AGENTS.md covers test framework choice and determinism rule. -->
 
-**Updated:** 2026-04-18 18:18
-**Commit:** 861c705
+**Updated:** 2026-04-18 10:22
+**Commit:** ad6a53e
 **Branch:** main
 
 # Test Patterns
@@ -22,7 +22,7 @@
 
 | Test File | Component | What's Verified |
 |-----------|-----------|-----------------|
-| GestureEngineTests.swift | GestureEngine | Start/stop lifecycle, stream restart, policy slot filtering, stable-ID commit, duplicate suppression until lift, tap/double-tap arbitration across configured finger counts, stable full-finger contact-set gating |
+| GestureEngineTests.swift | GestureEngine | Start/stop lifecycle, stream restart, policy slot filtering, stable-ID commit, duplicate suppression until lift, tap/double-tap arbitration across configured finger counts, stable full-finger contact-set gating, single-device multitouch arbitration in `MultitouchGestureSource` |
 | GestureClassifierTests.swift | GestureClassifier | All 8 swipe directions, finger count gating, stable IDs, dominant-axis rejection, lateral-drift tolerance on vertical swipes, opposing-direction rejection, threshold rejection |
 | PermissionCoordinatorTests.swift | PermissionCoordinator / AppState / ScrollSuppressor | Capability checks (`permissionState` / `inputMonitoringState` / `postEventState`), degraded startup modes, startup prompts, KeyboardShortcuts-driven config propagation, and runtime separation under partial failures |
 | ShortcutEmitterTests.swift | ShortcutEmitter | Lookup + send delegation, explicit modifier/key sequencing, unbound slot returns false |
