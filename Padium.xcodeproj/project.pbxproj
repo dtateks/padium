@@ -27,6 +27,7 @@
 		AA0101010116 /* MultitouchBridge.m in Sources */ = {isa = PBXBuildFile; fileRef = AA0201010117 /* MultitouchBridge.m */; };
 		AA0101010115 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = AA0201010115 /* Assets.xcassets */; };
 		AA0101010110 /* Logger.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0201010110 /* Logger.swift */; };
+		AA0101010120 /* ShortcutHotKeyGuard.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0201010120 /* ShortcutHotKeyGuard.swift */; };
 		AA0101020201 /* GestureClassifierTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0301020201 /* GestureClassifierTests.swift */; };
 		AA0101020202 /* GestureEngineTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0301020202 /* GestureEngineTests.swift */; };
 		AA0101020203 /* ShortcutRegistryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0301020203 /* ShortcutRegistryTests.swift */; };
@@ -59,6 +60,7 @@
 		AA0201010118 /* Padium-Bridging-Header.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = "Padium-Bridging-Header.h"; sourceTree = "<group>"; };
 		AA0201010115 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		AA0201010110 /* Logger.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Logger.swift; sourceTree = "<group>"; };
+		AA0201010120 /* ShortcutHotKeyGuard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShortcutHotKeyGuard.swift; sourceTree = "<group>"; };
 		AA0201010111 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		AA0301020201 /* GestureClassifierTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GestureClassifierTests.swift; sourceTree = "<group>"; };
 		AA0301020202 /* GestureEngineTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GestureEngineTests.swift; sourceTree = "<group>"; };
@@ -124,6 +126,7 @@
 				AA0201010112 /* SystemGestureManager.swift */,
 				AA0201010114 /* ScrollSuppressor.swift */,
 				AA0201010110 /* Logger.swift */,
+				AA0201010120 /* ShortcutHotKeyGuard.swift */,
 				AA0201010115 /* Assets.xcassets */,
 				AA0201010111 /* Info.plist */,
 			);
@@ -270,6 +273,7 @@
 				AA0101010111 /* SystemGestureManager.swift in Sources */,
 				AA0101010113 /* ScrollSuppressor.swift in Sources */,
 				AA0101010110 /* Logger.swift in Sources */,
+				AA0101010120 /* ShortcutHotKeyGuard.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
