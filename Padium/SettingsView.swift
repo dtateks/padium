@@ -93,11 +93,7 @@ struct SettingsContentView: View {
         }
         .frame(width: 740)
         .onAppear {
-            appState.setAppInteractionActive(true)
             appState.refreshPermissions()
-        }
-        .onDisappear {
-            appState.setAppInteractionActive(false)
         }
     }
     
