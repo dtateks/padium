@@ -1,3 +1,4 @@
+import AppKit
 import ApplicationServices
 import Foundation
 import KeyboardShortcuts
@@ -30,6 +31,10 @@ final class MiddleClickEmitter: MiddleClickEmitting {
     @discardableResult
     func emitMiddleClick() -> Bool {
         guard let src = CGEventSource(stateID: .hidSystemState) else { return false }
+        let frontmostBundleIdentifier = NSWorkspace.shared.frontmostApplication?.bundleIdentifier ?? "nil"
+        PadiumLogger.shortcut.notice(
+            "TAP-DIAG: middle click frontmost=\(frontmostBundleIdentifier, privacy: .public) appActive=\(NSApp.isActive)"
+        )
         let position = CGEvent(source: nil)?.location ?? .zero
         guard let down = CGEvent(mouseEventSource: src, mouseType: .otherMouseDown, mouseCursorPosition: position, mouseButton: .center),
               let up = CGEvent(mouseEventSource: src, mouseType: .otherMouseUp, mouseCursorPosition: position, mouseButton: .center)
@@ -66,6 +71,7 @@ extension PreemptionController: PreemptionControlling {}
 extension SystemGestureManager: SystemGestureManaging {}
 
 private let keyboardShortcutDidChangeNotification = Notification.Name("KeyboardShortcuts_shortcutByNameDidChange")
+let configurationDidChangeNotification = Notification.Name("Padium_configurationDidChange")
 
 enum RuntimeStatus: Equatable, Sendable {
     case checking
@@ -290,7 +296,9 @@ final class AppState {
         guard gestureSensitivity != clamped else { return }
         GestureSensitivitySetting.store(clamped)
         UserDefaults.standard.synchronize()
-        refreshStoredConfigurationIfNeeded()
+        if refreshStoredConfigurationIfNeeded() {
+            NotificationCenter.default.post(name: configurationDidChangeNotification, object: nil)
+        }
     }
 
     private func startRuntimeIfNeeded() {
@@ -344,12 +352,18 @@ final class AppState {
         guard scrollSuppressor.start() else {
             scrollSuppressor.setPhysicalClickHandler(nil)
             physicalClickRuntimeFailure = "Event tap failed to start. Physical 3/4-finger click gestures and scroll suppression are unavailable."
+            PadiumLogger.gesture.notice(
+                "TAP-DIAG: physical click runtime failed to start output=\(self.hasOutputAccess) input=\(self.hasInputMonitoringAccess) appInteraction=\(self.isAppInteractionActive)"
+            )
             return
         }
 
         scrollSuppressor.setAppInteractionActive(isAppInteractionActive)
         physicalClickRuntimeActive = true
         physicalClickRuntimeFailure = nil
+        PadiumLogger.gesture.notice(
+            "TAP-DIAG: physical click runtime active output=\(self.hasOutputAccess) input=\(self.hasInputMonitoringAccess) appInteraction=\(self.isAppInteractionActive)"
+        )
     }
 
     private func stopRuntime() {
@@ -377,6 +391,7 @@ final class AppState {
         // unexpected termination or rebuild-kill sequences.
         UserDefaults.standard.synchronize()
         refreshStoredConfigurationIfNeeded()
+        NotificationCenter.default.post(name: configurationDidChangeNotification, object: nil)
     }
 
     private func applySystemGestureSuppression() {
@@ -397,10 +412,11 @@ final class AppState {
         Self.configuredGestureSlots(from: supportedGestureSlots)
     }
 
-    private func refreshStoredConfigurationIfNeeded() {
+    @discardableResult
+    private func refreshStoredConfigurationIfNeeded() -> Bool {
         let currentConfiguration = currentStoredConfiguration()
         let previousConfiguration = observedConfiguration
-        guard currentConfiguration != previousConfiguration else { return }
+        guard currentConfiguration != previousConfiguration else { return false }
 
         let currentConflictingSettingKeys = Set(
             preemptionController.conflictingSettings(for: currentConfiguration.configuredSlots).map(\.key)
@@ -417,7 +433,7 @@ final class AppState {
         }
 
         guard currentConfiguration.configuredSlots != previousConfiguration.configuredSlots else {
-            return
+            return true
         }
 
         gestureEngine.updateActiveSlots(currentConfiguration.configuredSlots)
@@ -427,6 +443,7 @@ final class AppState {
             startRuntimeIfNeeded()
         }
         refreshSystemGestureConflicts()
+        return true
     }
 
     private func currentStoredConfiguration() -> StoredConfiguration {
@@ -443,12 +460,26 @@ final class AppState {
             return
         }
 
-        switch actionKind(for: event.slot) {
+        let actionKind = actionKind(for: event.slot)
+        if event.slot.isTapGesture {
+            PadiumLogger.gesture.notice(
+                "TAP-DIAG: dispatch slot=\(event.slot.rawValue, privacy: .public) source=\(String(describing: source), privacy: .public) action=\(actionKind.rawValue, privacy: .public)"
+            )
+        }
+
+        switch actionKind {
         case .shortcut:
-            _ = shortcutEmitter.emitConfiguredShortcut(for: event.slot)
+            let didEmit = shortcutEmitter.emitConfiguredShortcut(for: event.slot)
+            if event.slot.isTapGesture {
+                PadiumLogger.gesture.notice(
+                    "TAP-DIAG: shortcut emit slot=\(event.slot.rawValue, privacy: .public) success=\(didEmit)"
+                )
+            }
         case .middleClick:
-            PadiumLogger.gesture.debug("TAP-DIAG: emitting middle click for \(event.slot.rawValue, privacy: .public)")
-            _ = middleClickEmitter.emitMiddleClick()
+            let didEmit = middleClickEmitter.emitMiddleClick()
+            PadiumLogger.gesture.notice(
+                "TAP-DIAG: middle click emit slot=\(event.slot.rawValue, privacy: .public) success=\(didEmit)"
+            )
         }
     }
 
