@@ -132,6 +132,11 @@ struct GestureClassifier: Sendable {
         3: 0.25
     ]
 
+    // A real 2-finger tap keeps the fingertip pair shape nearly fixed while the
+    // hand lands and lifts. Incidental palm/corner contacts often deform or rotate
+    // that pair even when each contact's absolute travel stays below tap threshold.
+    private static let twoFingerTapPairVectorChangeTolerance: Float = 0.05
+
     // Swipes are only recognized for these finger counts; lower counts are
     // reserved for system gestures (2-finger scroll/back), higher counts
     // aren't exposed as slots today.
@@ -244,10 +249,38 @@ struct GestureClassifier: Sendable {
         aspectCorrectedDistance(from: startPoint, to: currentPoint)
     }
 
+    func tapCandidateMaintainsShape(
+        firstContacts: [Int: TouchPoint],
+        latestContacts: [Int: TouchPoint],
+        fingerCount: Int
+    ) -> Bool {
+        guard fingerCount == 2 else { return true }
+        guard firstContacts.count == 2, latestContacts.count == 2 else { return false }
+
+        let identifiers = firstContacts.keys.sorted()
+        guard identifiers == latestContacts.keys.sorted(), identifiers.count == 2,
+              let startA = firstContacts[identifiers[0]],
+              let startB = firstContacts[identifiers[1]],
+              let latestA = latestContacts[identifiers[0]],
+              let latestB = latestContacts[identifiers[1]]
+        else {
+            return false
+        }
+
+        let startVector = Self.aspectCorrectedPairVector(from: startA, to: startB)
+        let latestVector = Self.aspectCorrectedPairVector(from: latestA, to: latestB)
+        let pairVectorChange = Self.vectorMagnitude(
+            dx: latestVector.dx - startVector.dx,
+            dy: latestVector.dy - startVector.dy
+        )
+
+        return pairVectorChange <= Self.twoFingerTapPairVectorChangeTolerance
+    }
+
     static func aspectCorrectedDistance(from startPoint: TouchPoint, to currentPoint: TouchPoint) -> Float {
         let dx = (currentPoint.normalizedX - startPoint.normalizedX) * trackpadAspectRatio
         let dy = currentPoint.normalizedY - startPoint.normalizedY
-        return sqrt((dx * dx) + (dy * dy))
+        return vectorMagnitude(dx: dx, dy: dy)
     }
 
     /// Rejects contact sets whose mutual spread exceeds one hand's reach —
@@ -380,6 +413,17 @@ struct GestureClassifier: Sendable {
         case (4, .vertical, false):   return .fourFingerSwipeDown
         default:                      return nil
         }
+    }
+
+    private static func aspectCorrectedPairVector(from firstPoint: TouchPoint, to secondPoint: TouchPoint) -> (dx: Float, dy: Float) {
+        (
+            dx: (secondPoint.normalizedX - firstPoint.normalizedX) * trackpadAspectRatio,
+            dy: secondPoint.normalizedY - firstPoint.normalizedY
+        )
+    }
+
+    private static func vectorMagnitude(dx: Float, dy: Float) -> Float {
+        sqrt((dx * dx) + (dy * dy))
     }
 
     private enum SwipeAxis { case horizontal, vertical }

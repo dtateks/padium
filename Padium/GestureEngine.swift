@@ -64,6 +64,7 @@ final class GestureEngine {
         // The time the current peak was reached (or the candidate was created).
         // Re-anchored on every peak upgrade and on ID churn at the same peak.
         let startedAt: Date
+        var latestStableContacts: [Int: TouchPoint]
         var maximumTravel: Float = 0
 
         var trackedIdentifiers: Set<Int> {
@@ -191,6 +192,7 @@ final class GestureEngine {
 
             var candidate: GestureCandidate?
             var waitingForLift = false
+            var suppressNewCandidatesUntilLift = false
 
             for await frame in self.source.touchFrameStream {
                 if Task.isCancelled {
@@ -202,10 +204,11 @@ final class GestureEngine {
                 if frame.isEmpty {
                     if let candidate {
                         PadiumLogger.gesture.debug("TAP-DIAG: lift with candidate fc=\(candidate.peakFingerCount) travel=\(candidate.maximumTravel) dur=\(candidate.duration(at: self.scheduler.now))")
-                        self.handleLift(of: candidate, using: localContinuation)
+                        self.handleLift(of: candidate, classifier: localClassifier, using: localContinuation)
                     }
                     candidate = nil
                     waitingForLift = false
+                    suppressNewCandidatesUntilLift = false
                     sink.isMultitouchActive = false
                     continue
                 }
@@ -231,6 +234,20 @@ final class GestureEngine {
                 }
 
                 let fingerCount = contacts.count
+                let maxConfiguredFingerCount = self.maximumConfiguredFingerCount(defaultingTo: fingerCount)
+
+                if candidate == nil,
+                   fingerCount > maxConfiguredFingerCount {
+                    suppressNewCandidatesUntilLift = true
+                    sink.isMultitouchActive = fingerCount >= 3
+                    PadiumLogger.gesture.debug("TAP-DIAG: suppressing new candidates after unsupported prelude fc=\(fingerCount)")
+                    continue
+                }
+
+                if suppressNewCandidatesUntilLift {
+                    sink.isMultitouchActive = fingerCount >= 3
+                    continue
+                }
 
                 guard self.hasActiveSlots(for: fingerCount) else {
                     // No slots configured for the active count. Preserve any
@@ -285,6 +302,7 @@ final class GestureEngine {
                 }
 
                 var updatedCandidate = activeCandidate
+                updatedCandidate.latestStableContacts = contacts
                 updatedCandidate.recordTravel(using: contacts)
 
                 // Defer swipe classification while a higher finger count is
@@ -328,7 +346,8 @@ final class GestureEngine {
         GestureCandidate(
             originContacts: contacts,
             peakFingerCount: peakFingerCount,
-            startedAt: scheduler.now
+            startedAt: scheduler.now,
+            latestStableContacts: contacts
         )
     }
 
@@ -340,7 +359,7 @@ final class GestureEngine {
         for candidate: GestureCandidate,
         now: Date
     ) -> Bool {
-        let maxConfiguredFingerCount = activeSlots.map(\.fingerCount).max() ?? candidate.peakFingerCount
+        let maxConfiguredFingerCount = maximumConfiguredFingerCount(defaultingTo: candidate.peakFingerCount)
         // Peak already at the max configured count → no upgrade possible,
         // commit as soon as classifyIncremental sees enough motion.
         guard candidate.peakFingerCount < maxConfiguredFingerCount else { return true }
@@ -358,8 +377,18 @@ final class GestureEngine {
 
     private func handleLift(
         of candidate: GestureCandidate,
+        classifier: GestureClassifier,
         using continuation: AsyncStream<GestureEvent>.Continuation
     ) {
+        guard classifier.tapCandidateMaintainsShape(
+            firstContacts: candidate.originContacts,
+            latestContacts: candidate.latestStableContacts,
+            fingerCount: candidate.peakFingerCount
+        ) else {
+            PadiumLogger.gesture.debug("TAP-DIAG: REJECTED tap shape coherence for fc=\(candidate.peakFingerCount)")
+            return
+        }
+
         let recognitionTime = scheduler.now
         let duration = candidate.duration(at: recognitionTime)
         let travel = candidate.maximumTravel
@@ -379,6 +408,10 @@ final class GestureEngine {
             recognizedAt: recognitionTime,
             using: continuation
         )
+    }
+
+    private func maximumConfiguredFingerCount(defaultingTo fallback: Int) -> Int {
+        activeSlots.map(\.fingerCount).max() ?? fallback
     }
 
     private func handleRecognizedTap(

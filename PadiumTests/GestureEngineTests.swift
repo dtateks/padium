@@ -575,6 +575,43 @@ struct GestureEngineTests {
         #expect(received.map(\.slot) == [.threeFingerSwipeRight])
     }
 
+    @Test func unsupportedFourFingerPreludeDoesNotDowngradeIntoThreeFingerSwipe() async {
+        let source = StubGestureSource()
+        let scheduler = ManualGestureScheduler()
+        let engine = makeEngine(
+            source: source,
+            supportedSlots: [
+                .twoFingerDoubleTap,
+                .threeFingerSwipeRight, .threeFingerSwipeLeft,
+                .threeFingerSwipeUp, .threeFingerSwipeDown,
+                .threeFingerDoubleTap
+            ],
+            scheduler: scheduler
+        )
+        engine.start()
+        let eventsStream = engine.events
+
+        func point(_ id: Int, x: Float) -> TouchPoint {
+            TouchPoint(identifier: id, normalizedX: x, normalizedY: 0.5,
+                       pressure: 0.3, state: .touching, total: 0.15, majorAxis: 12.0)
+        }
+
+        let fourStart = (1...4).map { point($0, x: 0.10) }
+        let fourMid = (1...4).map { point($0, x: 0.40) }
+        let threeLateA = (1...3).map { point($0, x: 0.60) }
+        let threeLateB = (1...3).map { point($0, x: 0.90) }
+
+        let received = await driveAndCollect(
+            engine: engine,
+            source: source,
+            scheduler: scheduler,
+            frames: [fourStart, fourMid, threeLateA, threeLateB],
+            eventsStream: eventsStream
+        )
+
+        #expect(received.isEmpty)
+    }
+
     // Regression: when 4-finger gestures are also configured, the 3-finger
     // candidate must hold past the upgrade settle window so the 4th finger
     // has time to land even on slower hand placements. Five 3-finger frames
@@ -913,6 +950,76 @@ struct GestureEngineTests {
         )
 
         #expect(collector.events.map(\.slot) == [.twoFingerDoubleTap])
+
+        engine.stop()
+        await collectionTask.value
+    }
+
+    @Test func moderateTwoFingerPairDriftStillEmitsDoubleTap() async {
+        let source = StubGestureSource()
+        let scheduler = ManualGestureScheduler()
+        let engine = makeEngine(
+            source: source,
+            supportedSlots: [.twoFingerDoubleTap],
+            scheduler: scheduler
+        )
+        engine.start()
+
+        let collector = EventCollector()
+        let collectionTask = collector.collect(from: engine.events)
+
+        let validDriftFrames = [
+            [
+                TouchPoint(identifier: 1, normalizedX: 0.46, normalizedY: 0.50, pressure: 0.3, state: .touching, total: 0.15, majorAxis: 12.0),
+                TouchPoint(identifier: 2, normalizedX: 0.54, normalizedY: 0.50, pressure: 0.3, state: .touching, total: 0.15, majorAxis: 12.0)
+            ],
+            [
+                TouchPoint(identifier: 1, normalizedX: 0.468, normalizedY: 0.488, pressure: 0.3, state: .touching, total: 0.15, majorAxis: 12.0),
+                TouchPoint(identifier: 2, normalizedX: 0.532, normalizedY: 0.522, pressure: 0.3, state: .touching, total: 0.15, majorAxis: 12.0)
+            ]
+        ]
+
+        await performTap(source: source, scheduler: scheduler, frames: validDriftFrames)
+        scheduler.advance(by: 0.10)
+        await performTap(source: source, scheduler: scheduler, frames: validDriftFrames)
+
+        #expect(collector.events.map(\.slot) == [.twoFingerDoubleTap])
+
+        engine.stop()
+        await collectionTask.value
+    }
+
+    @Test func changingTwoFingerPairShapeDoesNotCountTowardDoubleTap() async {
+        let source = StubGestureSource()
+        let scheduler = ManualGestureScheduler()
+        let engine = makeEngine(
+            source: source,
+            supportedSlots: [.twoFingerDoubleTap],
+            scheduler: scheduler
+        )
+        engine.start()
+
+        let collector = EventCollector()
+        let collectionTask = collector.collect(from: engine.events)
+
+        let palmLikeFrames = [
+            [
+                TouchPoint(identifier: 1, normalizedX: 0.36, normalizedY: 0.83, pressure: 0.3, state: .touching, total: 0.15, majorAxis: 12.0),
+                TouchPoint(identifier: 2, normalizedX: 0.44, normalizedY: 0.83, pressure: 0.3, state: .touching, total: 0.15, majorAxis: 12.0)
+            ],
+            [
+                TouchPoint(identifier: 1, normalizedX: 0.385, normalizedY: 0.80, pressure: 0.3, state: .touching, total: 0.15, majorAxis: 12.0),
+                TouchPoint(identifier: 2, normalizedX: 0.435, normalizedY: 0.86, pressure: 0.3, state: .touching, total: 0.15, majorAxis: 12.0)
+            ]
+        ]
+
+        await performTap(source: source, scheduler: scheduler, frames: palmLikeFrames)
+        scheduler.advance(by: 0.10)
+        await performTap(source: source, scheduler: scheduler, frames: palmLikeFrames)
+        scheduler.advance(by: GestureTapSettings.doubleTapWindow + 0.01)
+        await flushPipeline()
+
+        #expect(collector.events.isEmpty)
 
         engine.stop()
         await collectionTask.value

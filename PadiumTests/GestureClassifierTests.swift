@@ -277,6 +277,48 @@ struct GestureClassifierTests {
         #expect(c.stableActiveContacts(in: close) != nil)
     }
 
+    @Test func acceptsTwoFingerTapPairShapeWhenContactsMoveTogether() {
+        let c = makeClassifier()
+        let first = [
+            pt(id: 1, x: 0.48, y: 0.50),
+            pt(id: 2, x: 0.52, y: 0.50)
+        ]
+        let last = [
+            pt(id: 1, x: 0.49, y: 0.50),
+            pt(id: 2, x: 0.53, y: 0.50)
+        ]
+
+        #expect(c.tapCandidateMaintainsShape(firstContacts: [1: first[0], 2: first[1]], latestContacts: [1: last[0], 2: last[1]], fingerCount: 2))
+    }
+
+    @Test func acceptsTwoFingerTapPairShapeWithModerateFingerDrift() {
+        let c = makeClassifier()
+        let first = [
+            pt(id: 1, x: 0.46, y: 0.50),
+            pt(id: 2, x: 0.54, y: 0.50)
+        ]
+        let last = [
+            pt(id: 1, x: 0.468, y: 0.488),
+            pt(id: 2, x: 0.532, y: 0.522)
+        ]
+
+        #expect(c.tapCandidateMaintainsShape(firstContacts: [1: first[0], 2: first[1]], latestContacts: [1: last[0], 2: last[1]], fingerCount: 2))
+    }
+
+    @Test func rejectsTwoFingerTapPairShapeWhenGeometryDeforms() {
+        let c = makeClassifier()
+        let first = [
+            pt(id: 1, x: 0.36, y: 0.83),
+            pt(id: 2, x: 0.44, y: 0.83)
+        ]
+        let last = [
+            pt(id: 1, x: 0.385, y: 0.80),
+            pt(id: 2, x: 0.435, y: 0.86)
+        ]
+
+        #expect(!c.tapCandidateMaintainsShape(firstContacts: [1: first[0], 2: first[1]], latestContacts: [1: last[0], 2: last[1]], fingerCount: 2))
+    }
+
     @Test func rejectsThreeFingerContactsFurtherApartThanOneHand() {
         let c = makeClassifier()
         // Three contacts spanning aspect-corrected ≈ 1.20 — exceeds 3-finger threshold 1.00.
