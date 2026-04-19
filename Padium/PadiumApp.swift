@@ -1,4 +1,5 @@
 import SwiftUI
+import KeyboardShortcuts
 
 @main
 struct PadiumApp: App {
@@ -6,6 +7,14 @@ struct PadiumApp: App {
     @State private var appState: AppState
 
     init() {
+        // Padium uses the KeyboardShortcuts package only for Recorder UI and
+        // UserDefaults-backed shortcut storage. It never wants the package to
+        // capture real keystrokes as global hotkeys — doing so would consume
+        // keystrokes inside Padium (or any frontmost app when a hotkey is
+        // active) and stop Padium's own synthetic keystrokes from reaching
+        // the target app. See ShortcutHotKeyGuard for the per-name disable.
+        ShortcutHotKeyGuard.install()
+
         let state = AppState()
         if !Self.isRunningUnderTestHarness {
             state.handleAppLaunch {
@@ -73,9 +82,25 @@ struct PadiumApp: App {
     }
 }
 
+@MainActor
 class AppDelegate: NSObject, NSApplicationDelegate {
     weak var appState: AppState?
     var showSettingsWindow: (() -> Void)?
+    var rememberFrontmostApplicationHandler: (() -> Void)?
+    var restorePreviousApplicationHandler: (() -> Void)?
+
+    private weak var observedSettingsWindow: NSWindow?
+    private var previouslyFrontmostExternalApplication: NSRunningApplication?
+
+    override init() {
+        super.init()
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handleConfigurationDidChange(_:)),
+            name: configurationDidChangeNotification,
+            object: nil
+        )
+    }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         openSettingsWindow()
@@ -96,8 +121,101 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         false
     }
 
+    func observeSettingsWindow(_ window: NSWindow) {
+        guard observedSettingsWindow !== window else { return }
+
+        removeSettingsWindowObservers()
+
+        observedSettingsWindow = window
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handleSettingsWindowDidBecomeKey(_:)),
+            name: NSWindow.didBecomeKeyNotification,
+            object: window
+        )
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handleSettingsWindowDidResignKey(_:)),
+            name: NSWindow.didResignKeyNotification,
+            object: window
+        )
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handleSettingsWindowWillClose(_:)),
+            name: NSWindow.willCloseNotification,
+            object: window
+        )
+    }
+
     private func openSettingsWindow() {
+        rememberFrontmostExternalApplicationIfNeeded()
         showSettingsWindow?()
+    }
+
+    private func rememberFrontmostExternalApplicationIfNeeded() {
+        if let rememberFrontmostApplicationHandler {
+            rememberFrontmostApplicationHandler()
+            return
+        }
+
+        guard let frontmostApplication = NSWorkspace.shared.frontmostApplication,
+              frontmostApplication.bundleIdentifier != Bundle.main.bundleIdentifier else {
+            return
+        }
+
+        previouslyFrontmostExternalApplication = frontmostApplication
+    }
+
+    private func restorePreviouslyFrontmostApplicationIfNeeded() {
+        if let restorePreviousApplicationHandler {
+            setAppInteractionActive(false)
+            restorePreviousApplicationHandler()
+            return
+        }
+
+        defer { previouslyFrontmostExternalApplication = nil }
+
+        guard NSApp.isActive,
+              let previousApplication = previouslyFrontmostExternalApplication,
+              !previousApplication.isTerminated else {
+            return
+        }
+
+        setAppInteractionActive(false)
+        _ = previousApplication.activate(options: [])
+    }
+
+    private func setAppInteractionActive(_ isActive: Bool) {
+        appState?.setAppInteractionActive(isActive)
+    }
+
+    private func removeSettingsWindowObservers() {
+        guard let observedSettingsWindow else { return }
+        NotificationCenter.default.removeObserver(self, name: NSWindow.didBecomeKeyNotification, object: observedSettingsWindow)
+        NotificationCenter.default.removeObserver(self, name: NSWindow.didResignKeyNotification, object: observedSettingsWindow)
+        NotificationCenter.default.removeObserver(self, name: NSWindow.willCloseNotification, object: observedSettingsWindow)
+        self.observedSettingsWindow = nil
+    }
+
+    @objc private func handleConfigurationDidChange(_ notification: Notification) {
+        restorePreviouslyFrontmostApplicationIfNeeded()
+    }
+
+    @objc private func handleSettingsWindowDidBecomeKey(_ notification: Notification) {
+        setAppInteractionActive(true)
+    }
+
+    @objc private func handleSettingsWindowDidResignKey(_ notification: Notification) {
+        setAppInteractionActive(false)
+    }
+
+    @objc private func handleSettingsWindowWillClose(_ notification: Notification) {
+        setAppInteractionActive(false)
+        restorePreviouslyFrontmostApplicationIfNeeded()
+        observedSettingsWindow = nil
+        NotificationCenter.default.removeObserver(self, name: NSWindow.didBecomeKeyNotification, object: notification.object)
+        NotificationCenter.default.removeObserver(self, name: NSWindow.didResignKeyNotification, object: notification.object)
+        NotificationCenter.default.removeObserver(self, name: NSWindow.willCloseNotification, object: notification.object)
     }
 }
 
@@ -109,12 +227,33 @@ private struct SettingsWindowBridge: View {
     var body: some View {
         Color.clear
             .frame(width: 0, height: 0)
+            .background(SettingsWindowObserver(appDelegate: appDelegate))
             .onAppear {
                 appDelegate.showSettingsWindow = { [openWindow] in
                     openWindow(id: "settings")
                     focusSettingsWindow()
                 }
             }
+    }
+}
+
+private struct SettingsWindowObserver: NSViewRepresentable {
+    let appDelegate: AppDelegate
+
+    func makeNSView(context: Context) -> NSView {
+        let view = NSView(frame: .zero)
+        DispatchQueue.main.async { [weak view] in
+            guard let window = view?.window else { return }
+            appDelegate.observeSettingsWindow(window)
+        }
+        return view
+    }
+
+    func updateNSView(_ nsView: NSView, context: Context) {
+        DispatchQueue.main.async { [weak nsView] in
+            guard let window = nsView?.window else { return }
+            appDelegate.observeSettingsWindow(window)
+        }
     }
 }
 
