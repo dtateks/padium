@@ -1,6 +1,6 @@
 <!-- Scoped to Padium/ source directory. Root AGENTS.md covers architecture, contracts, and conventions. -->
 
-**Updated:** 2026-04-19 16:02
+**Updated:** 2026-04-19 19:03
 **Commit:** working tree
 **Branch:** main
 
@@ -27,6 +27,7 @@
 | PermissionsView.swift | UI | Accessibility status + per-system-gesture conflict list + "Open Trackpad Settings" + "Refresh" |
 | GestureRowView.swift | UI | `KeyboardShortcuts.Recorder(for:)` per slot, shows conflict warning via `isConflicting` flag |
 | Logger.swift | Logging | `PadiumLogger` enum: `.gesture`, `.shortcut`, `.permission` categories |
+| ShortcutHotKeyGuard.swift | Hotkey guard | Installs at app init; disables every `GestureSlot` name in `KeyboardShortcuts` at startup and after every `shortcutByNameDidChange`, preventing Recorder writes from registering an active Carbon hotkey that would swallow Padium's own synthetic key chord |
 
 # Module-Specific Gotchas
 - `MultitouchGestureSource` is `@unchecked Sendable` — callback processing is serialized on a dedicated queue; keep device arbitration and continuation access on that queue
@@ -41,6 +42,10 @@
 - `PermissionCoordinator` polling is owned by `AppState` from app launch so permission revocation can stop the runtime even while settings is closed
 - `AppState` distinguishes `isTouchRuntimeActive`, `isPhysicalClickRuntimeActive`, `hasInputMonitoringAccess`, and `hasOutputAccess` for UI and runtime status
 - `AppState` listens to `KeyboardShortcuts_shortcutByNameDidChange` and `UserDefaults.didChangeNotification`; on any change, active slots/conflicts refresh immediately and runtimes adapt without relaunch
+- Settings window focus is not neutral for shortcut output: opening settings activates Padium, so settings-window orchestration must remember the previously frontmost non-Padium app and restore it on window close before expecting emitted keyboard shortcuts to hit the user's target app
+- `AppState.setAppInteractionActive(_:)` must track the settings window's real key/focus state, not just view visibility; latching it from `onAppear`/`onDisappear` leaves physical click gestures stuck in pass-through after focus is restored away from Padium while the window remains open
+- `ShortcutEmitter` modifier synthesis must guarantee modifier key-up cleanup on any mid-sequence failure; stranded synthetic modifiers poison the user's real keyboard shortcuts until Padium exits
+- Padium uses `KeyboardShortcuts` only as a recorder + persistent-storage library. The package's `userDefaultsSet(...)` path registers every written shortcut as a Carbon hotkey on Padium's own event dispatcher. When the recorded chord is then synthesized by `ShortcutEmitter` while Padium is frontmost, that hotkey intercepts the event and the target app never sees it — the user experiences "config change not applying until quit/reopen". `ShortcutHotKeyGuard` must disable every gesture slot's hotkey at startup AND synchronously re-disable after each `shortcutByNameDidChange`, so new recordings and unchanged stored shortcuts never live as active global hotkeys
 - Runtime can be `.degraded` when either pipeline fails or Input Monitoring is missing; failures are isolated so one pipeline can remain active while the other degrades
 - App activation/reopen explicitly focuses the existing settings window rather than spawning duplicates
 - `AppState.setAppInteractionActive(_:)` marks Padium's own menu/settings surfaces as UI-interaction mode so `ScrollSuppressor` passes physical left-click events through while the user is interacting with Padium itself

@@ -26,4 +26,5 @@
 | GestureClassifierTests.swift | GestureClassifier | All 8 swipe directions, finger count gating, stable IDs, dominant-axis rejection, lateral-drift tolerance on vertical swipes, opposing-direction rejection, threshold rejection, and 2-finger tap pair-shape drift/deformation checks |
 | PermissionCoordinatorTests.swift | PermissionCoordinator / AppState / ScrollSuppressor | Capability checks (`permissionState` / `inputMonitoringState` / `postEventState`), degraded startup modes, startup prompts, KeyboardShortcuts-driven config propagation, and runtime separation under partial failures |
 | ShortcutEmitterTests.swift | ShortcutEmitter | Lookup + send delegation, explicit modifier/key sequencing, unbound slot returns false |
+| PermissionCoordinatorTests.swift (hotkey guard suite) | ShortcutHotKeyGuard | Recorder writes + pre-existing stored shortcuts never remain active Carbon hotkeys after guard install |
 | ShortcutRegistryTests.swift | ShortcutRegistry / SystemGestureManager | Name format `"gesture.\(rawValue)"` consistency; vertical Dock-key suppression only when all enabled vertical gestures are suppressed |
