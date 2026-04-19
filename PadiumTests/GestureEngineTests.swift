@@ -1423,6 +1423,139 @@ struct GestureEngineTests {
         await collectionTask.value
     }
 
+    // Regression: a 4-finger swipe whose 4th finger arrives AFTER a 3-finger
+    // candidate already formed (and is only configured for 2/3-finger slots)
+    // must never downgrade into a 3-finger commit. The raw-peak taint drops
+    // the in-flight candidate the moment a RAW frame of >max-configured
+    // appears, and latches suppression until lift.
+    @Test func fourthFingerAfterThreeFingerCandidateDoesNotCommitThreeFingerSwipe() async {
+        let source = StubGestureSource()
+        let scheduler = ManualGestureScheduler()
+        let engine = makeEngine(
+            source: source,
+            supportedSlots: [
+                .twoFingerDoubleTap,
+                .threeFingerSwipeRight, .threeFingerSwipeLeft,
+                .threeFingerSwipeUp, .threeFingerSwipeDown,
+                .threeFingerDoubleTap
+            ],
+            scheduler: scheduler
+        )
+        engine.start()
+        let eventsStream = engine.events
+
+        func point(_ id: Int, x: Float) -> TouchPoint {
+            TouchPoint(identifier: id, normalizedX: x, normalizedY: 0.5,
+                       pressure: 0.3, state: .touching, total: 0.15, majorAxis: 12.0)
+        }
+
+        // 3 fingers visible briefly with sub-threshold motion (the realistic
+        // landing-spread pattern), then the 4th finger arrives and the hand
+        // completes a clear 4-finger swipe — which isn't configured, so
+        // nothing must emit.
+        let three1 = (1...3).map { point($0, x: 0.10) }
+        let three2 = (1...3).map { point($0, x: 0.12) }
+        let four1 = (1...4).map { point($0, x: 0.30) }
+        let four2 = (1...4).map { point($0, x: 0.60) }
+        let four3 = (1...4).map { point($0, x: 0.90) }
+
+        let received = await driveAndCollect(
+            engine: engine,
+            source: source,
+            scheduler: scheduler,
+            frames: [three1, three2, four1, four2, four3],
+            eventsStream: eventsStream
+        )
+
+        #expect(received.isEmpty)
+    }
+
+    // Regression: two contacts that land asynchronously (palm at one corner,
+    // then second palm at another corner while typing) must not register a
+    // tap even if the final stable frame looks geometrically plausible.
+    // Real one-hand 2-finger taps land within ~50ms; asynchronous corner
+    // palms routinely exceed 80ms apart.
+    @Test func asynchronousTwoFingerLandingDoesNotEmitDoubleTap() async {
+        let source = StubGestureSource()
+        let scheduler = ManualGestureScheduler()
+        let engine = makeEngine(
+            source: source,
+            supportedSlots: [.twoFingerDoubleTap],
+            scheduler: scheduler
+        )
+        engine.start()
+
+        let collector = EventCollector()
+        let collectionTask = collector.collect(from: engine.events)
+
+        func point(_ id: Int, x: Float, state: TouchState = .touching) -> TouchPoint {
+            TouchPoint(identifier: id, normalizedX: x, normalizedY: 0.50,
+                       pressure: 0.3, state: state, total: 0.15, majorAxis: 12.0)
+        }
+
+        // Tap 1: finger 1 lands first, then >80ms later finger 2 lands; both
+        // end up in a stable frame that passes shape coherence, but the raw
+        // first-seen spread exceeds the concurrency window.
+        source.yieldFrame([point(1, x: 0.48)])
+        await flushPipeline()
+        scheduler.advance(by: 0.15)
+        source.yieldFrame([point(1, x: 0.48), point(2, x: 0.52)])
+        await flushPipeline()
+        scheduler.advance(by: 0.02)
+        source.yieldFrame([])
+        await flushPipeline()
+
+        // Tap 2: same asynchronous pattern.
+        scheduler.advance(by: 0.10)
+        source.yieldFrame([point(3, x: 0.48)])
+        await flushPipeline()
+        scheduler.advance(by: 0.15)
+        source.yieldFrame([point(3, x: 0.48), point(4, x: 0.52)])
+        await flushPipeline()
+        scheduler.advance(by: 0.02)
+        source.yieldFrame([])
+        await flushPipeline()
+
+        #expect(collector.events.isEmpty)
+
+        engine.stop()
+        await collectionTask.value
+    }
+
+    // Regression proving sensitivity isn't regressed: two contacts that land
+    // within the concurrency window (simultaneous one-hand tap) must still
+    // produce a double tap.
+    @Test func synchronousTwoFingerLandingStillEmitsDoubleTap() async {
+        let source = StubGestureSource()
+        let scheduler = ManualGestureScheduler()
+        let engine = makeEngine(
+            source: source,
+            supportedSlots: [.twoFingerDoubleTap],
+            scheduler: scheduler
+        )
+        engine.start()
+
+        let collector = EventCollector()
+        let collectionTask = collector.collect(from: engine.events)
+
+        await performTap(
+            source: source,
+            scheduler: scheduler,
+            frames: makeTapFrames(fingerCount: 2)
+        )
+        scheduler.advance(by: 0.10)
+        await performTap(
+            source: source,
+            scheduler: scheduler,
+            frames: makeTapFrames(fingerCount: 2)
+        )
+
+        #expect(collector.events.map(\.slot) == [.twoFingerDoubleTap])
+
+        engine.stop()
+        await collectionTask.value
+    }
+
     @Test func engineCanRestartAfterStop() async {
         let source = StubGestureSource()
         let scheduler = ManualGestureScheduler()

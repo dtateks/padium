@@ -109,6 +109,16 @@ final class GestureEngine {
     // independent of OMS frame rate (90–120 Hz across hardware).
     private static let peakUpgradeSettleWindow: TimeInterval = 0.080
 
+    // Maximum wall-clock spread between the first and last identifier of a
+    // real N-finger tap. Two fingers from one hand land within ~30–50 ms on
+    // macOS trackpads; palms at opposite trackpad corners while typing land
+    // independently and typically exceed 80 ms apart. Gate is evaluated on
+    // raw-frame identifier first-seen timestamps (not on classifier-filtered
+    // contacts) so palm+finger artefacts that happen to settle into a valid
+    // frame still fail the concurrency test. 80 ms is the same budget used
+    // by `peakUpgradeSettleWindow` — consistent latency ceiling.
+    private static let multiFingerConcurrencyWindow: TimeInterval = 0.080
+
     private let source: any GestureSource
     private let classifierFactory: @Sendable () -> GestureClassifier
     private let scheduler: any GestureScheduling
@@ -193,6 +203,18 @@ final class GestureEngine {
             var candidate: GestureCandidate?
             var waitingForLift = false
             var suppressNewCandidatesUntilLift = false
+            // Raw-frame identifier first-seen timestamps for the whole sequence
+            // (reset on lift). Drives the multi-finger concurrency gate that
+            // rejects asynchronously-landed palm/corner contacts which pass
+            // geometric filters by coincidence.
+            var identifierFirstSeenAt: [Int: Date] = [:]
+            // Highest RAW frame.count observed in the current sequence. This
+            // is the load-bearing signal against "unsupported higher-count
+            // frame appears AFTER a candidate already formed" — the classic
+            // 4-finger-lands-after-3 path. Tainted even when raw fingers
+            // aren't yet classifiable (starting/making states) so nothing
+            // about stable contacts can hide a real 4-finger event.
+            var rawMaximumFingerCount = 0
 
             for await frame in self.source.touchFrameStream {
                 if Task.isCancelled {
@@ -203,15 +225,34 @@ final class GestureEngine {
 
                 if frame.isEmpty {
                     if let candidate {
-                        PadiumLogger.gesture.debug("TAP-DIAG: lift with candidate fc=\(candidate.peakFingerCount) travel=\(candidate.maximumTravel) dur=\(candidate.duration(at: self.scheduler.now))")
-                        self.handleLift(of: candidate, classifier: localClassifier, using: localContinuation)
+                        PadiumLogger.gesture.debug("TAP-DIAG: lift with candidate fc=\(candidate.peakFingerCount) travel=\(candidate.maximumTravel) dur=\(candidate.duration(at: self.scheduler.now)) rawPeak=\(rawMaximumFingerCount)")
+                        self.handleLift(
+                            of: candidate,
+                            classifier: localClassifier,
+                            identifierFirstSeenAt: identifierFirstSeenAt,
+                            using: localContinuation
+                        )
                     }
                     candidate = nil
                     waitingForLift = false
                     suppressNewCandidatesUntilLift = false
+                    identifierFirstSeenAt.removeAll(keepingCapacity: true)
+                    rawMaximumFingerCount = 0
                     sink.isMultitouchActive = false
                     continue
                 }
+
+                // Record first-seen timestamps for every raw identifier in
+                // this frame BEFORE any filtering, so the concurrency gate
+                // sees the true landing spread even when early frames are
+                // rejected by `stableActiveContacts`.
+                let nowForFrame = self.scheduler.now
+                for point in frame where identifierFirstSeenAt[point.identifier] == nil {
+                    identifierFirstSeenAt[point.identifier] = nowForFrame
+                }
+
+                // Track raw peak count independent of classifier filters.
+                rawMaximumFingerCount = max(rawMaximumFingerCount, frame.count)
 
                 if waitingForLift {
                     if frame.count >= 2 {
@@ -224,7 +265,30 @@ final class GestureEngine {
                 // false-positive investigation has per-touch geometry, state,
                 // total capacitance, and major-axis without attaching a debugger.
                 if frame.count >= 2 {
-                    PadiumLogger.gesture.debug("TAP-DIAG: frame fc=\(frame.count) raw=\(Self.describeFrame(frame), privacy: .public)")
+                    PadiumLogger.gesture.debug("TAP-DIAG: frame fc=\(frame.count) rawPeak=\(rawMaximumFingerCount) raw=\(Self.describeFrame(frame), privacy: .public)")
+                }
+
+                let maxConfiguredFingerCount = self.maximumConfiguredFingerCount(
+                    defaultingTo: max(frame.count, rawMaximumFingerCount)
+                )
+
+                // LOAD-BEARING GATE: if the RAW frame count (or the sequence's
+                // raw peak) ever exceeded the max configured finger count,
+                // this sequence belongs to an unbound higher-finger macOS
+                // gesture. Drop any in-flight candidate and suppress new
+                // candidates until the user lifts. This bursts the classic
+                // "4-finger vuốt landed after 3-finger candidate already
+                // formed" false-positive path, regardless of whether the
+                // extra finger appears in the very first frame, mid-sequence,
+                // or during the lift transition.
+                if rawMaximumFingerCount > maxConfiguredFingerCount {
+                    if candidate != nil || !suppressNewCandidatesUntilLift {
+                        PadiumLogger.gesture.debug("TAP-DIAG: rawPeak SUPPRESS rawPeak=\(rawMaximumFingerCount) maxConfigured=\(maxConfiguredFingerCount) hadCandidate=\(candidate != nil)")
+                    }
+                    candidate = nil
+                    suppressNewCandidatesUntilLift = true
+                    sink.isMultitouchActive = frame.count >= 3
+                    continue
                 }
 
                 guard let contacts = localClassifier.stableActiveContacts(in: frame, expectedFingerCount: frame.count) else {
@@ -239,15 +303,6 @@ final class GestureEngine {
                 }
 
                 let fingerCount = contacts.count
-                let maxConfiguredFingerCount = self.maximumConfiguredFingerCount(defaultingTo: fingerCount)
-
-                if candidate == nil,
-                   fingerCount > maxConfiguredFingerCount {
-                    suppressNewCandidatesUntilLift = true
-                    sink.isMultitouchActive = fingerCount >= 3
-                    PadiumLogger.gesture.debug("TAP-DIAG: prelude SUPPRESS fc=\(fingerCount) maxConfigured=\(maxConfiguredFingerCount)")
-                    continue
-                }
 
                 if suppressNewCandidatesUntilLift {
                     sink.isMultitouchActive = fingerCount >= 3
@@ -388,8 +443,30 @@ final class GestureEngine {
     private func handleLift(
         of candidate: GestureCandidate,
         classifier: GestureClassifier,
+        identifierFirstSeenAt: [Int: Date],
         using continuation: AsyncStream<GestureEvent>.Continuation
     ) {
+        // Multi-finger concurrency gate: two contacts of a real one-hand tap
+        // land within ~30-50ms. Palms at opposite trackpad corners while
+        // typing land independently and typically exceed 80ms apart. Applied
+        // before shape coherence so asynchronous arrivals that happen to end
+        // up geometrically plausible still fail. Checked for 2+ finger taps
+        // across all tap slots (2, 3, 4 finger) because the load-bearing
+        // signal — one-hand synchronicity — holds for each.
+        if candidate.peakFingerCount >= 2 {
+            let identifiers = Array(candidate.originContacts.keys)
+            let timestamps = identifiers.compactMap { identifierFirstSeenAt[$0] }
+            if timestamps.count == candidate.peakFingerCount,
+               let earliest = timestamps.min(),
+               let latest = timestamps.max() {
+                let spread = latest.timeIntervalSince(earliest)
+                if spread > Self.multiFingerConcurrencyWindow {
+                    PadiumLogger.gesture.debug("TAP-DIAG: REJECTED tap concurrency fc=\(candidate.peakFingerCount) spread=\(spread) window=\(Self.multiFingerConcurrencyWindow)")
+                    return
+                }
+            }
+        }
+
         guard classifier.tapCandidateMaintainsShape(
             firstContacts: candidate.originContacts,
             latestContacts: candidate.latestStableContacts,
