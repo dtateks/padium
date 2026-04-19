@@ -155,6 +155,19 @@ struct AppDelegateTests {
         #expect(delegate.applicationShouldTerminateAfterLastWindowClosed(NSApplication.shared) == false)
     }
 
+    @Test func applicationDidFinishLaunchingRemembersFrontmostApplicationBeforeOpeningSettingsWindow() {
+        let delegate = AppDelegate()
+        var rememberCount = 0
+        var openCount = 0
+        delegate.rememberFrontmostApplicationHandler = { rememberCount += 1 }
+        delegate.showSettingsWindow = { openCount += 1 }
+
+        delegate.applicationDidFinishLaunching(Notification(name: NSApplication.didFinishLaunchingNotification))
+
+        #expect(rememberCount == 1)
+        #expect(openCount == 1)
+    }
+
     @Test func appIsAgentOnlyWithoutDockIcon() {
         #expect(Bundle.main.object(forInfoDictionaryKey: "LSUIElement") as? Bool == true)
     }
@@ -201,6 +214,67 @@ struct AppDelegateTests {
         delegate.applicationDidBecomeActive(Notification(name: NSApplication.didBecomeActiveNotification))
         #expect(openCount == 0)
     }
+
+    @Test func observedSettingsWindowRestoresPreviousApplicationOnClose() {
+        let delegate = AppDelegate()
+        let window = NSWindow()
+        var restoreCount = 0
+        delegate.restorePreviousApplicationHandler = { restoreCount += 1 }
+
+        delegate.observeSettingsWindow(window)
+        NotificationCenter.default.post(name: NSWindow.willCloseNotification, object: window)
+
+        #expect(restoreCount == 1)
+    }
+
+    @Test func configurationChangeNotificationRestoresPreviousApplication() {
+        let delegate = AppDelegate()
+        var restoreCount = 0
+        delegate.restorePreviousApplicationHandler = { restoreCount += 1 }
+
+        NotificationCenter.default.post(name: configurationDidChangeNotification, object: nil)
+
+        #expect(restoreCount == 1)
+    }
+
+    @Test @MainActor func observedSettingsWindowTracksAppInteractionFromKeyState() {
+        let delegate = AppDelegate()
+        let suppressor = RecordingPhysicalClickCoordinator()
+        let state = AppState(
+            permissionChecker: MockPermissionChecker(),
+            gestureEngine: RecordingGestureRuntime(),
+            scrollSuppressor: suppressor
+        )
+        let window = NSWindow()
+        delegate.appState = state
+
+        delegate.observeSettingsWindow(window)
+        NotificationCenter.default.post(name: NSWindow.didBecomeKeyNotification, object: window)
+        NotificationCenter.default.post(name: NSWindow.didResignKeyNotification, object: window)
+
+        #expect(suppressor.appInteractionStates == [true, false])
+    }
+
+    @Test @MainActor func configurationChangeDropsAppInteractionWhileSettingsWindowStaysOpen() {
+        let delegate = AppDelegate()
+        let suppressor = RecordingPhysicalClickCoordinator()
+        let state = AppState(
+            permissionChecker: MockPermissionChecker(),
+            gestureEngine: RecordingGestureRuntime(),
+            scrollSuppressor: suppressor
+        )
+        let window = NSWindow()
+        var restoreCount = 0
+        delegate.appState = state
+        delegate.restorePreviousApplicationHandler = { restoreCount += 1 }
+
+        delegate.observeSettingsWindow(window)
+        NotificationCenter.default.post(name: NSWindow.didBecomeKeyNotification, object: window)
+        NotificationCenter.default.post(name: configurationDidChangeNotification, object: nil)
+
+        #expect(restoreCount == 1)
+        #expect(suppressor.appInteractionStates == [true, false])
+    }
 }
 
 // MARK: - AppState tests
@@ -214,7 +288,7 @@ struct AppStateTests {
         preemptionController: (any PreemptionControlling)? = nil,
         systemGestureManager: RecordingSystemGestureManager = RecordingSystemGestureManager(),
         runtime: RecordingGestureRuntime = RecordingGestureRuntime(),
-        emitter: RecordingShortcutEmitter = RecordingShortcutEmitter(),
+        emitter: any ShortcutEmitting = RecordingShortcutEmitter(),
         middleClickEmitter: RecordingMiddleClickEmitter = RecordingMiddleClickEmitter(),
         scrollSuppressor: (any PhysicalClickCoordinating)? = RecordingPhysicalClickCoordinator()
     ) -> AppState {
@@ -403,6 +477,67 @@ struct AppStateTests {
         await pumpEventLoop()
 
         #expect(emitter.emittedSlots == [.threeFingerSwipeLeft])
+        _ = preservedConfig
+    }
+
+    @Test @MainActor func changingShortcutValueAppliesImmediatelyWithoutRestart() async {
+        let preservedConfig = GestureConfigurationPreserver()
+        let checker = MockPermissionChecker(accessibility: true)
+        let runtime = RecordingGestureRuntime()
+        let emitter = RecordingUserDefaultsShortcutEmitter()
+        clearAllShortcutBindings()
+        defer { clearAllShortcutBindings() }
+
+        let name = ShortcutRegistry.name(for: .threeFingerSwipeLeft)
+        let firstShortcut = KeyboardShortcuts.Shortcut(.f13, modifiers: [])
+        let secondShortcut = KeyboardShortcuts.Shortcut(.f14, modifiers: [.command])
+        KeyboardShortcuts.setShortcut(firstShortcut, for: name)
+
+        let state = makeState(checker: checker, runtime: runtime, emitter: emitter)
+
+        state.refreshPermissions()
+        await pumpEventLoop()
+
+        runtime.yield(.threeFingerSwipeLeft)
+        await pumpEventLoop()
+        #expect(emitter.emittedShortcuts == [firstShortcut])
+
+        KeyboardShortcuts.setShortcut(secondShortcut, for: name)
+        await pumpEventLoop()
+
+        runtime.yield(.threeFingerSwipeLeft)
+        await pumpEventLoop()
+        #expect(emitter.emittedShortcuts == [firstShortcut, secondShortcut])
+
+        _ = state
+        _ = preservedConfig
+    }
+
+    @Test @MainActor func shortcutValueChangePostsConfigurationDidChangeNotification() async {
+        let preservedConfig = GestureConfigurationPreserver()
+        clearAllShortcutBindings()
+        defer { clearAllShortcutBindings() }
+
+        let slot = GestureSlot.threeFingerSwipeLeft
+        let name = ShortcutRegistry.name(for: slot)
+        KeyboardShortcuts.setShortcut(KeyboardShortcuts.Shortcut(.f13, modifiers: []), for: name)
+
+        let state = makeState(checker: MockPermissionChecker(accessibility: true))
+        let notificationCounter = NotificationCounter()
+        let observer = NotificationCenter.default.addObserver(
+            forName: configurationDidChangeNotification,
+            object: nil,
+            queue: nil
+        ) { _ in
+            notificationCounter.count += 1
+        }
+        defer { NotificationCenter.default.removeObserver(observer) }
+
+        KeyboardShortcuts.setShortcut(KeyboardShortcuts.Shortcut(.f14, modifiers: [.command]), for: name)
+        state.handleShortcutConfigurationChange()
+        await pumpEventLoop()
+
+        #expect(notificationCounter.count == 1)
         _ = preservedConfig
     }
 
@@ -1182,6 +1317,45 @@ struct ScrollSuppressorTests {
         #expect(suppressor.shouldAllowTouchTap(fingerCount: 3, at: Date()) == true)
     }
 
+    @Test @MainActor func shortcutHotKeyGuardKeepsRecordedShortcutFromBecomingActiveHotKey() {
+        let preservedConfig = GestureConfigurationPreserver()
+        defer { _ = preservedConfig }
+
+        let slot = GestureSlot.threeFingerSwipeLeft
+        let name = ShortcutRegistry.name(for: slot)
+        let shortcut = KeyboardShortcuts.Shortcut(.f13, modifiers: [])
+
+        ShortcutHotKeyGuard.install()
+
+        // Recorder flow performs setShortcut → register → notification.
+        KeyboardShortcuts.setShortcut(shortcut, for: name)
+
+        // After the guard runs, the shortcut must still be persisted...
+        #expect(KeyboardShortcuts.getShortcut(for: name) == shortcut)
+        // ...but must NOT be an active global hotkey, or else Padium-frontmost
+        // emissions of this chord would be swallowed until quit+reopen.
+        #expect(KeyboardShortcuts.isEnabled(for: name) == false)
+    }
+
+    @Test @MainActor func shortcutHotKeyGuardDisablesPreExistingStoredShortcuts() {
+        let preservedConfig = GestureConfigurationPreserver()
+        defer { _ = preservedConfig }
+
+        let slot = GestureSlot.threeFingerSwipeRight
+        let name = ShortcutRegistry.name(for: slot)
+        let shortcut = KeyboardShortcuts.Shortcut(.f14, modifiers: [.command])
+        KeyboardShortcuts.setShortcut(shortcut, for: name)
+
+        // Force a registered hotkey before the guard sees it.
+        KeyboardShortcuts.onKeyDown(for: name) {}
+        defer { KeyboardShortcuts.removeHandler(for: name) }
+
+        ShortcutHotKeyGuard.disableAllRegisteredGestureShortcuts()
+
+        #expect(KeyboardShortcuts.getShortcut(for: name) == shortcut)
+        #expect(KeyboardShortcuts.isEnabled(for: name) == false)
+    }
+
     @Test func unconfiguredPhysicalClickPassesThroughWithoutTouchTapDedupWindow() {
         let suppressor = ScrollSuppressor()
         suppressor.currentFingerCount = 3
@@ -1252,6 +1426,11 @@ final class MockPermissionChecker: PermissionChecking, @unchecked Sendable {
     func requestPostEventAccess() {
         requestPostEventAccessCallCount += 1
     }
+}
+
+@MainActor
+final class NotificationCounter {
+    var count = 0
 }
 
 @MainActor
@@ -1430,6 +1609,21 @@ final class RecordingShortcutEmitter: ShortcutEmitting {
 
     func emitConfiguredShortcut(for slot: GestureSlot) -> Bool {
         emittedSlots.append(slot)
+        return true
+    }
+}
+
+@MainActor
+final class RecordingUserDefaultsShortcutEmitter: ShortcutEmitting {
+    private(set) var emittedSlots: [GestureSlot] = []
+    private(set) var emittedShortcuts: [KeyboardShortcuts.Shortcut] = []
+
+    func emitConfiguredShortcut(for slot: GestureSlot) -> Bool {
+        emittedSlots.append(slot)
+        guard let shortcut = KeyboardShortcuts.getShortcut(for: ShortcutRegistry.name(for: slot)) else {
+            return false
+        }
+        emittedShortcuts.append(shortcut)
         return true
     }
 }
