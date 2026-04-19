@@ -124,4 +124,44 @@ struct ShortcutEmitterTests {
             ShortcutEventStep(keyCode: CGKeyCode(shortcut.carbonKeyCode), isKeyDown: false, flags: [])
         ])
     }
+
+    @Test func senderFailureReleasesAlreadyPressedModifiers() {
+        let shortcut = KeyboardShortcuts.Shortcut(.k, modifiers: [.command, .shift])
+        var attemptedSteps: [ShortcutEventStep] = []
+
+        let sender = CGEventShortcutSender(stepPerformer: { step in
+            attemptedSteps.append(step)
+            return attemptedSteps.count != 3
+        })
+
+        #expect(sender.send(shortcut) == false)
+        #expect(attemptedSteps == [
+            ShortcutEventStep(keyCode: CGKeyCode(kVK_Command), isKeyDown: true, flags: [.maskCommand]),
+            ShortcutEventStep(keyCode: CGKeyCode(kVK_Shift), isKeyDown: true, flags: [.maskCommand, .maskShift]),
+            ShortcutEventStep(keyCode: CGKeyCode(shortcut.carbonKeyCode), isKeyDown: true, flags: [.maskCommand, .maskShift]),
+            ShortcutEventStep(keyCode: CGKeyCode(kVK_Shift), isKeyDown: false, flags: [.maskCommand]),
+            ShortcutEventStep(keyCode: CGKeyCode(kVK_Command), isKeyDown: false, flags: [])
+        ])
+    }
+
+    @Test func senderFailureDuringModifierReleaseStillCleansUpRemainingModifiers() {
+        let shortcut = KeyboardShortcuts.Shortcut(.k, modifiers: [.command, .shift])
+        var attemptedSteps: [ShortcutEventStep] = []
+
+        let sender = CGEventShortcutSender(stepPerformer: { step in
+            attemptedSteps.append(step)
+            return attemptedSteps.count != 5
+        })
+
+        #expect(sender.send(shortcut) == false)
+        #expect(attemptedSteps == [
+            ShortcutEventStep(keyCode: CGKeyCode(kVK_Command), isKeyDown: true, flags: [.maskCommand]),
+            ShortcutEventStep(keyCode: CGKeyCode(kVK_Shift), isKeyDown: true, flags: [.maskCommand, .maskShift]),
+            ShortcutEventStep(keyCode: CGKeyCode(shortcut.carbonKeyCode), isKeyDown: true, flags: [.maskCommand, .maskShift]),
+            ShortcutEventStep(keyCode: CGKeyCode(shortcut.carbonKeyCode), isKeyDown: false, flags: [.maskCommand, .maskShift]),
+            ShortcutEventStep(keyCode: CGKeyCode(kVK_Shift), isKeyDown: false, flags: [.maskCommand]),
+            ShortcutEventStep(keyCode: CGKeyCode(kVK_Shift), isKeyDown: false, flags: [.maskCommand]),
+            ShortcutEventStep(keyCode: CGKeyCode(kVK_Command), isKeyDown: false, flags: [])
+        ])
+    }
 }

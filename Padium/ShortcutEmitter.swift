@@ -11,25 +11,99 @@ protocol ShortcutSending: AnyObject {
 // Posts a CGEvent key-down + key-up pair for the given shortcut.
 // Requires Accessibility permission for synthetic events to reach other apps.
 final class CGEventShortcutSender: ShortcutSending {
-    func send(_ shortcut: KeyboardShortcuts.Shortcut) -> Bool {
-        guard let src = CGEventSource(stateID: .hidSystemState) else {
-            return false
-        }
+    private let stepPerformer: ((ShortcutEventStep) -> Bool)?
 
-        for step in ShortcutEventSequence.steps(for: shortcut) {
-            guard let event = CGEvent(
-                keyboardEventSource: src,
-                virtualKey: step.keyCode,
-                keyDown: step.isKeyDown
-            ) else {
+    init(stepPerformer: ((ShortcutEventStep) -> Bool)? = nil) {
+        self.stepPerformer = stepPerformer
+    }
+
+    func send(_ shortcut: KeyboardShortcuts.Shortcut) -> Bool {
+        let performStep: (ShortcutEventStep) -> Bool
+        if let stepPerformer {
+            performStep = stepPerformer
+        } else {
+            guard let src = CGEventSource(stateID: .hidSystemState) else {
                 return false
             }
 
-            event.flags = step.flags
-            event.post(tap: .cghidEventTap)
+            performStep = { step in
+                guard let event = CGEvent(
+                    keyboardEventSource: src,
+                    virtualKey: step.keyCode,
+                    keyDown: step.isKeyDown
+                ) else {
+                    return false
+                }
+
+                event.flags = step.flags
+                event.post(tap: .cghidEventTap)
+                return true
+            }
+        }
+
+        var activeModifierKeyCodes: [CGKeyCode] = []
+
+        for step in ShortcutEventSequence.steps(for: shortcut) {
+            guard performStep(step) else {
+                releaseActiveModifiers(activeModifierKeyCodes: activeModifierKeyCodes, performStep: performStep)
+                return false
+            }
+
+            guard modifierFlag(for: step.keyCode) != nil else {
+                continue
+            }
+
+            if step.isKeyDown {
+                activeModifierKeyCodes.append(step.keyCode)
+            } else {
+                activeModifierKeyCodes.removeAll { keyCode in
+                    keyCode == step.keyCode
+                }
+            }
+
         }
 
         return true
+    }
+
+    private func releaseActiveModifiers(
+        activeModifierKeyCodes: [CGKeyCode],
+        performStep: (ShortcutEventStep) -> Bool
+    ) {
+        var remainingActiveModifierKeyCodes = activeModifierKeyCodes
+
+        for keyCode in activeModifierKeyCodes.reversed() {
+            guard modifierFlag(for: keyCode) != nil else {
+                continue
+            }
+
+            remainingActiveModifierKeyCodes.removeAll { value in
+                value == keyCode
+            }
+
+            let flags = remainingActiveModifierKeyCodes.reduce(into: CGEventFlags()) { partialResult, code in
+                if let flag = modifierFlag(for: code) {
+                    partialResult.insert(flag)
+                }
+            }
+
+            _ = performStep(ShortcutEventStep(keyCode: keyCode, isKeyDown: false, flags: flags))
+        }
+    }
+
+    private func modifierFlag(for keyCode: CGKeyCode) -> CGEventFlags? {
+        switch keyCode {
+        case CGKeyCode(kVK_Command):
+            return .maskCommand
+        case CGKeyCode(kVK_Shift):
+            return .maskShift
+        case CGKeyCode(kVK_Option):
+            return .maskAlternate
+        case CGKeyCode(kVK_Control):
+            return .maskControl
+        default:
+            return nil
+        }
     }
 }
 
@@ -47,8 +121,15 @@ final class ShortcutEmitter {
     func emitConfiguredShortcut(for slot: GestureSlot) -> Bool {
         let name = ShortcutRegistry.name(for: slot)
         guard let shortcut = KeyboardShortcuts.getShortcut(for: name) else {
+            PadiumLogger.shortcut.notice(
+                "TAP-DIAG: shortcut lookup missing slot=\(slot.rawValue, privacy: .public) frontmost=\(NSWorkspace.shared.frontmostApplication?.bundleIdentifier ?? "nil", privacy: .public) appActive=\(NSApp.isActive)"
+            )
             return false
         }
+        let frontmostBundleIdentifier = NSWorkspace.shared.frontmostApplication?.bundleIdentifier ?? "nil"
+        PadiumLogger.shortcut.notice(
+            "TAP-DIAG: shortcut lookup slot=\(slot.rawValue, privacy: .public) keyCode=\(shortcut.carbonKeyCode) modifiers=\(shortcut.carbonModifiers) frontmost=\(frontmostBundleIdentifier, privacy: .public) appActive=\(NSApp.isActive)"
+        )
         return sender.send(shortcut)
     }
 }
