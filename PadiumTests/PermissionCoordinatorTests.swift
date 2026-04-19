@@ -506,6 +506,69 @@ struct AppStateTests {
         _ = preservedConfig
     }
 
+    @Test @MainActor func nonConflictingShortcutChangeDoesNotReapplySystemSuppression() {
+        let preservedConfig = GestureConfigurationPreserver()
+        let controller = StubPreemptionController(settings: StubPreemptionController.allEnabledSettings)
+        let systemGestureManager = RecordingSystemGestureManager()
+        clearAllShortcutBindings()
+        defer { clearAllShortcutBindings() }
+
+        KeyboardShortcuts.setShortcut(.init(.f13, modifiers: []), for: ShortcutRegistry.name(for: .threeFingerSwipeLeft))
+
+        let state = makeState(
+            checker: MockPermissionChecker(accessibility: true),
+            preemptionController: controller,
+            systemGestureManager: systemGestureManager
+        )
+
+        state.refreshPermissions()
+
+        #expect(systemGestureManager.suppressCallCount == 1)
+        #expect(systemGestureManager.restoreCallCount == 0)
+        #expect(systemGestureManager.suppressedSettingKeys == ["TrackpadThreeFingerHorizSwipeGesture"])
+
+        KeyboardShortcuts.setShortcut(.init(.f14, modifiers: []), for: ShortcutRegistry.name(for: .oneFingerDoubleTap))
+        state.handleShortcutConfigurationChange()
+
+        #expect(systemGestureManager.suppressCallCount == 1)
+        #expect(systemGestureManager.restoreCallCount == 0)
+        #expect(systemGestureManager.suppressedSettingKeys == ["TrackpadThreeFingerHorizSwipeGesture"])
+        _ = preservedConfig
+    }
+
+    @Test @MainActor func conflictingShortcutChangeUpdatesSuppressionWithoutRestoreBounce() {
+        let preservedConfig = GestureConfigurationPreserver()
+        let controller = StubPreemptionController(settings: StubPreemptionController.allEnabledSettings)
+        let systemGestureManager = RecordingSystemGestureManager()
+        clearAllShortcutBindings()
+        defer { clearAllShortcutBindings() }
+
+        KeyboardShortcuts.setShortcut(.init(.f13, modifiers: []), for: ShortcutRegistry.name(for: .threeFingerSwipeLeft))
+
+        let state = makeState(
+            checker: MockPermissionChecker(accessibility: true),
+            preemptionController: controller,
+            systemGestureManager: systemGestureManager
+        )
+
+        state.refreshPermissions()
+
+        #expect(systemGestureManager.suppressCallCount == 1)
+        #expect(systemGestureManager.restoreCallCount == 0)
+        #expect(systemGestureManager.suppressedSettingKeys == ["TrackpadThreeFingerHorizSwipeGesture"])
+
+        KeyboardShortcuts.setShortcut(.init(.f14, modifiers: []), for: ShortcutRegistry.name(for: .fourFingerSwipeUp))
+        state.handleShortcutConfigurationChange()
+
+        #expect(systemGestureManager.suppressCallCount == 2)
+        #expect(systemGestureManager.restoreCallCount == 0)
+        #expect(systemGestureManager.suppressedSettingKeys == [
+            "TrackpadFourFingerVertSwipeGesture",
+            "TrackpadThreeFingerHorizSwipeGesture"
+        ])
+        _ = preservedConfig
+    }
+
     @Test @MainActor func changingSensitivityDoesNotRestartRunningRuntime() {
         let preservedConfig = GestureConfigurationPreserver()
         let checker = MockPermissionChecker(accessibility: true)
@@ -1149,6 +1212,7 @@ struct ScrollSuppressorTests {
             Issue.record("Expected unconfigured click up to pass through")
         }
     }
+
 }
 
 // MARK: - Mocks
@@ -1257,11 +1321,13 @@ final class StubPreemptionController: PreemptionControlling {
 @MainActor
 final class RecordingSystemGestureManager: SystemGestureManaging {
     private(set) var suppressedSettingKeys: [String] = []
+    private(set) var suppressCallCount = 0
     private(set) var restoreCallCount = 0
     private(set) var restoreIfNeededCallCount = 0
     var isSuppressed: Bool { !suppressedSettingKeys.isEmpty }
 
     func suppress(conflictingSettings: [SystemGestureSetting], allSettings: [SystemGestureSetting]) {
+        suppressCallCount += 1
         suppressedSettingKeys = conflictingSettings.map(\.key).sorted()
     }
 
