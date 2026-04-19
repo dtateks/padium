@@ -1,7 +1,7 @@
 # Padium — Agent Memory
 
-**Updated:** 2026-04-18 10:22
-**Commit:** ad6a53e
+**Updated:** 2026-04-19 15:24
+**Commit:** working tree
 **Branch:** main
 
 ## Project Overview
@@ -77,6 +77,9 @@ Physical click path: `ScrollSuppressor` CGEventTap detects configured 3/4-finger
 - `GestureEngine` tracks a peak finger count per candidate and upgrades (re-anchors origin + startedAt) when a higher count appears; it never downgrades on lift transitions, so a 4-finger swipe whose lift drops through 3/2 fingers cannot misfire as a smaller-finger tap. Swipe classification is gated by a wall-clock settle window (~80 ms) ONLY when the peak is below the highest configured finger count — this is the libinput Pattern B "wait for additional fingers" semantics, sized for Padium's bounded peak. When peak equals max configured, commit happens on motion alone (no wait). Time-based via `scheduler.now`, so behavior is independent of frame timing. After emission it suppresses duplicates until a lift frame
 - `GestureClassifier` requires stable touch identifiers, dominant-axis commitment, and per-finger direction agreement; vertical swipes tolerate lateral drift while the dominant axis stays vertical
 - `GestureClassifier.stableActiveContacts` enforces a per-finger-count hand-spread gate (aspect-corrected pairwise distance): 2 fingers ≤ 0.70, 3 fingers ≤ 1.00, 4+ unchecked. Rejects two-handed palm artefacts (e.g. palms on opposite trackpad corners while typing) that slip past the majorAxis palm filter, without reducing sensitivity for single-hand gestures on any trackpad size
+- `GestureEngine` must suppress lower-count candidate creation until lift after an unsupported higher-count prelude; this prevents a 4-finger macOS gesture from degrading into a Padium 3-finger candidate when 4-finger Padium slots are unbound
+- `GestureEngine.handleLift` validates 2-finger taps against `GestureClassifier.tapCandidateMaintainsShape` before duration/travel arbitration; the goal is to reject palm/corner artefacts by contact-pair geometry, not by keyboard heuristics or extra dwell requirements
+- `GestureClassifier.tapCandidateMaintainsShape` is 2-finger-only and compares the aspect-corrected pair vector between first and latest stable contacts; keep it permissive enough for moderate finger drift so sensitivity does not regress
 - `GestureEngine` is touch-only: it emits swipes plus double-tap slots (1/2-finger double-tap and 3/4-finger double-tap) and never emits physical click/double-click slots; there are no single touch-tap slots — only double-tap
 - Legacy 3/4 click slots keep their historical raw values (`threeFingerTap`, `threeFingerDoubleTap`, `fourFingerTap`, `fourFingerDoubleTap`) for persisted shortcut/action-kind compatibility; 3/4-finger touch double-tap slots use distinct raw values (`threeFingerTouchDoubleTap`, `fourFingerTouchDoubleTap`)
 - Shared sensitivity changes apply immediately without restarting the runtime for swipes and touch taps; `GestureClassifier` reads the current swipe threshold live and tap travel tolerance uses the same boosted sensitivity curve. UI sensitivity applies a +20 point base boost before threshold mapping, so default 50% behaves like the previous 70% calibration

@@ -1,7 +1,7 @@
 <!-- Scoped to Padium/ source directory. Root AGENTS.md covers architecture, contracts, and conventions. -->
 
-**Updated:** 2026-04-18 10:22
-**Commit:** ad6a53e
+**Updated:** 2026-04-19 15:24
+**Commit:** working tree
 **Branch:** main
 
 # Source Files
@@ -33,8 +33,10 @@
 - `MultitouchGestureSource` accepts frames from exactly one device until it reports empty points, then switches ownership to a newly active device on the next non-empty frame
 - `GestureClassifier` applies a +20 point base boost before threshold mapping; swipe thresholds range 0.04-0.10 (previous 0.06-0.14), touch-tap travel thresholds range 0.04-0.07, and both use the same live shared sensitivity curve without an AppState runtime restart
 - Palm rejection is geometric only: `GestureClassifier.stableActiveContacts` rejects contacts whose aspect-corrected pairwise spread exceeds one-hand reach — 2-finger 0.70, 3-finger 1.00, 4+ unchecked — catching two-palm-at-corners artefacts without any keyboard-activity heuristic
+- `GestureClassifier.tapCandidateMaintainsShape` is the tap-specific palm/corner filter for 2-finger double taps: it compares the aspect-corrected pair vector between the first and latest stable contacts and should stay permissive enough for moderate real finger drift
 - `GestureClassifier` tolerates lateral drift on vertical swipes while preserving dominant-axis commitment and per-finger agreement
 - `GestureEngine` tracks a peak finger count per candidate: it upgrades and re-anchors `originContacts`/`startedAt` when a higher count appears and preserves the candidate (no downgrade) when fewer fingers are active during landing/lift transitions. Swipe classification is gated by a wall-clock settle window (`peakUpgradeSettleWindow`, 80 ms via `scheduler.now`) ONLY when a higher finger count is still configured (i.e. an upgrade is still possible). When the peak already equals the highest configured finger count there is no settle wait — commit happens on motion alone. This is the libinput Pattern B (`UNKNOWN [hold_timer] → committed`) sized for Padium's bounded peak (max 4 fingers) and the empirical 20–60 ms multi-finger landing spread on macOS trackpads. Time-based, not frame-based, so behavior is independent of multitouch frame rate (90–120 Hz across hardware). `handleLift` always evaluates tap recognition against the peak — a 4-finger swipe whose lift drops through 3/2 fingers can never register a 2/3-finger tap. Frames after a committed gesture are still ignored until a lift frame clears the candidate.
+- `GestureEngine` also latches `suppressNewCandidatesUntilLift` after an unsupported higher-count prelude, so an unbound 4-finger macOS gesture cannot seed a fresh 3-finger Padium candidate mid-sequence
 - `PermissionCoordinator` tracking includes `PermissionState` for Accessibility, listen-event (Input Monitoring), and post-event access separately
 - `PermissionCoordinator` polling is owned by `AppState` from app launch so permission revocation can stop the runtime even while settings is closed
 - `AppState` distinguishes `isTouchRuntimeActive`, `isPhysicalClickRuntimeActive`, `hasInputMonitoringAccess`, and `hasOutputAccess` for UI and runtime status
