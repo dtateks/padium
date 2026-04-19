@@ -214,21 +214,26 @@ final class GestureEngine {
                 }
 
                 if waitingForLift {
+                    if frame.count >= 2 {
+                        PadiumLogger.gesture.debug("TAP-DIAG: post-commit frame ignored fc=\(frame.count) raw=\(Self.describeFrame(frame), privacy: .public)")
+                    }
                     continue
                 }
 
-                // Log raw frame states for 3+ touch frames
-                if frame.count >= 3 {
-                    let states = frame.map { "\($0.identifier):\($0.state.rawValue)" }.joined(separator: " ")
-                    PadiumLogger.gesture.debug("TAP-DIAG: frame touches=\(frame.count) states=[\(states, privacy: .public)]")
+                // Log raw frame telemetry for 2+ touch frames so palm/corner
+                // false-positive investigation has per-touch geometry, state,
+                // total capacitance, and major-axis without attaching a debugger.
+                if frame.count >= 2 {
+                    PadiumLogger.gesture.debug("TAP-DIAG: frame fc=\(frame.count) raw=\(Self.describeFrame(frame), privacy: .public)")
                 }
 
                 guard let contacts = localClassifier.stableActiveContacts(in: frame, expectedFingerCount: frame.count) else {
                     // Touches are present but not in a classifiable state (e.g., starting
                     // or leaving transitions). Keep the candidate alive so tap recognition
                     // can complete on the subsequent empty frame.
-                    if frame.count >= 3 {
-                        PadiumLogger.gesture.debug("TAP-DIAG: no active contacts, candidate=\(candidate != nil)")
+                    if frame.count >= 2 {
+                        let reason = Self.describeStableContactsRejection(frame: frame)
+                        PadiumLogger.gesture.debug("TAP-DIAG: no stable contacts fc=\(frame.count) reason=\(reason, privacy: .public) candidate=\(candidate != nil)")
                     }
                     continue
                 }
@@ -240,7 +245,7 @@ final class GestureEngine {
                    fingerCount > maxConfiguredFingerCount {
                     suppressNewCandidatesUntilLift = true
                     sink.isMultitouchActive = fingerCount >= 3
-                    PadiumLogger.gesture.debug("TAP-DIAG: suppressing new candidates after unsupported prelude fc=\(fingerCount)")
+                    PadiumLogger.gesture.debug("TAP-DIAG: prelude SUPPRESS fc=\(fingerCount) maxConfigured=\(maxConfiguredFingerCount)")
                     continue
                 }
 
@@ -271,6 +276,7 @@ final class GestureEngine {
                 sink.isMultitouchActive = max(fingerCount, candidate?.peakFingerCount ?? 0) >= 3
 
                 guard let activeCandidate = candidate else {
+                    PadiumLogger.gesture.debug("TAP-DIAG: candidate SEED fc=\(fingerCount)")
                     candidate = self.makeCandidate(contacts: contacts, peakFingerCount: fingerCount)
                     continue
                 }
@@ -279,6 +285,7 @@ final class GestureEngine {
                     // UPGRADE: more fingers than ever seen. Re-anchor at the
                     // new peak so swipe displacement is measured from when
                     // the user's intended finger count was actually present.
+                    PadiumLogger.gesture.debug("TAP-DIAG: candidate UPGRADE peak=\(activeCandidate.peakFingerCount) -> \(fingerCount)")
                     candidate = self.makeCandidate(contacts: contacts, peakFingerCount: fingerCount)
                     continue
                 }
@@ -291,12 +298,14 @@ final class GestureEngine {
                     var preserved = activeCandidate
                     preserved.recordTravel(using: contacts)
                     candidate = preserved
+                    PadiumLogger.gesture.debug("TAP-DIAG: candidate HOLD peak=\(preserved.peakFingerCount) active=\(fingerCount) travel=\(preserved.maximumTravel)")
                     continue
                 }
 
                 // fingerCount == peakFingerCount.
                 guard activeCandidate.trackedIdentifiers == Set(contacts.keys) else {
                     // ID churn at the peak — re-anchor with the new identifiers.
+                    PadiumLogger.gesture.debug("TAP-DIAG: candidate RE-ANCHOR (id churn) peak=\(fingerCount) oldIDs=\(activeCandidate.trackedIdentifiers.sorted(), privacy: .public) newIDs=\(contacts.keys.sorted(), privacy: .public)")
                     candidate = self.makeCandidate(contacts: contacts, peakFingerCount: fingerCount)
                     continue
                 }
@@ -320,6 +329,7 @@ final class GestureEngine {
                        peakFingerCount: updatedCandidate.peakFingerCount
                    ),
                    self.activeSlots.contains(event.slot) {
+                    PadiumLogger.gesture.debug("TAP-DIAG: EMIT swipe slot=\(event.slot.rawValue, privacy: .public) fc=\(updatedCandidate.peakFingerCount) travel=\(updatedCandidate.maximumTravel) dur=\(updatedCandidate.duration(at: self.scheduler.now))")
                     localContinuation.yield(event)
                     waitingForLift = true
                     candidate = nil
@@ -385,7 +395,9 @@ final class GestureEngine {
             latestContacts: candidate.latestStableContacts,
             fingerCount: candidate.peakFingerCount
         ) else {
-            PadiumLogger.gesture.debug("TAP-DIAG: REJECTED tap shape coherence for fc=\(candidate.peakFingerCount)")
+            let originDesc = Self.describeFrame(Array(candidate.originContacts.values))
+            let latestDesc = Self.describeFrame(Array(candidate.latestStableContacts.values))
+            PadiumLogger.gesture.debug("TAP-DIAG: REJECTED tap shape coherence fc=\(candidate.peakFingerCount) origin=[\(originDesc, privacy: .public)] latest=[\(latestDesc, privacy: .public)]")
             return
         }
 
@@ -414,6 +426,46 @@ final class GestureEngine {
         activeSlots.map(\.fingerCount).max() ?? fallback
     }
 
+    // Dense per-touch description used in TAP-DIAG logs: id, state, normalized
+    // position, total capacitance, and major-axis ellipse — the exact raw
+    // signals that drive palm and noise rejection. Nothing here feeds logic,
+    // only telemetry, so the format is optimised for grep-ability in os_log.
+    private static func describeFrame(_ frame: [TouchPoint]) -> String {
+        let sorted = frame.sorted { $0.identifier < $1.identifier }
+        return sorted.map { point in
+            let xs = String(format: "%.3f", point.normalizedX)
+            let ys = String(format: "%.3f", point.normalizedY)
+            let total = String(format: "%.3f", point.total)
+            let major = String(format: "%.1f", point.majorAxis)
+            return "\(point.identifier):\(point.state.rawValue)@(\(xs),\(ys))/t\(total)/m\(major)"
+        }.joined(separator: " ")
+    }
+
+    // Classify why `stableActiveContacts` dropped a frame so logs make the
+    // root cause obvious (noise capacitance, palm major-axis, inactive state,
+    // duplicate identifier, or one-hand spread rejection).
+    private static func describeStableContactsRejection(frame: [TouchPoint]) -> String {
+        var reasons: [String] = []
+        for point in frame.sorted(by: { $0.identifier < $1.identifier }) {
+            if point.total < 0.03 {
+                reasons.append("\(point.identifier):noise")
+            }
+            if point.majorAxis > 30 {
+                reasons.append("\(point.identifier):palmMajor")
+            }
+            switch point.state {
+            case .hovering, .notTouching, .leaving:
+                reasons.append("\(point.identifier):inactive(\(point.state.rawValue))")
+            default:
+                break
+            }
+        }
+        if reasons.isEmpty {
+            reasons.append("spreadOrDuplicate")
+        }
+        return reasons.joined(separator: ",")
+    }
+
     private func handleRecognizedTap(
         fingerCount: Int,
         recognizedAt: Date,
@@ -428,10 +480,12 @@ final class GestureEngine {
         if let priorTap,
            recognizedAt.timeIntervalSince(priorTap.recognizedAt) <= GestureTapSettings.doubleTapWindow,
            let doubleTapSlot = activation.doubleTapSlot {
+            PadiumLogger.gesture.debug("TAP-DIAG: EMIT doubleTap slot=\(doubleTapSlot.rawValue, privacy: .public) fc=\(fingerCount) gap=\(recognizedAt.timeIntervalSince(priorTap.recognizedAt))")
             emit(doubleTapSlot, at: recognizedAt, using: continuation)
             return
         }
 
+        PadiumLogger.gesture.debug("TAP-DIAG: PENDING tap fc=\(fingerCount) waitingForSecondTap=true")
         let scheduledWork = scheduler.schedule(after: GestureTapSettings.doubleTapWindow) { [weak self] in
             self?.cleanUpExpiredPendingTap(for: fingerCount)
         }
