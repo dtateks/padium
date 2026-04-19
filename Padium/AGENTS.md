@@ -1,6 +1,6 @@
 <!-- Scoped to Padium/ source directory. Root AGENTS.md covers architecture, contracts, and conventions. -->
 
-**Updated:** 2026-04-19 15:24
+**Updated:** 2026-04-19 16:02
 **Commit:** working tree
 **Branch:** main
 
@@ -46,6 +46,7 @@
 - `AppState.setAppInteractionActive(_:)` marks Padium's own menu/settings surfaces as UI-interaction mode so `ScrollSuppressor` passes physical left-click events through while the user is interacting with Padium itself
 - `PreemptionController.conflictingSlots(for:)` returns only the currently configured Padium slots that still conflict with enabled system gestures; `AppState` refreshes this after permission and shortcut-binding changes
 - Multitouch source reads raw touches in parallel with macOS — it cannot suppress system gesture recognizers; `SystemGestureManager` handles system gesture prefs (Mission Control, Spaces, App Exposé); Dock keys are only disabled when all enabled vertical gestures are suppressed, not when a single finger-count variant is suppressed. `ScrollSuppressor` handles scroll-during-multitouch via CGEventTap and still activates only for 3+ active fingers
+- Live shortcut/config edits only reapply `SystemGestureManager` when the conflicting system-gesture key set changes; reconfiguration while already suppressed must update disabled/restored keys in one pass, not restore→suppress the Dock twice
 - `ScrollSuppressor.isMultitouchActive` and `currentFingerCount` are set from `GestureEngine`'s pipeline task via the injected `MultitouchStateSink` (which runs on an arbitrary thread from the multitouch source); both use the same `os_unfair_lock`-protected state read by the CGEventTap callback, but physical click routing must require `isMultitouchActive == true` in addition to a raw 3/4-finger count so landing/lift noise cannot swallow ordinary clicks
 - `ScrollSuppressor.start()/stop()` run the CGEventTap on a dedicated thread; the thread saves its `CFRunLoop` (lock-protected) so `stop()` wakes and exits that run loop deterministically, then removes the source and joins — no main-run-loop workaround, no thread leak on restart
 - `GestureRowView` uses `@AppStorage` bound to `GestureActionStore.userDefaultsKey(for:)`, so the picker reflects external UserDefaults changes without a stale snapshot from view init; writes still go through `GestureActionStore.setActionKind` so the "remove key when back to `.shortcut`" behaviour is preserved

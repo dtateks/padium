@@ -1,6 +1,6 @@
 # Padium — Agent Memory
 
-**Updated:** 2026-04-19 15:24
+**Updated:** 2026-04-19 16:02
 **Commit:** working tree
 **Branch:** main
 
@@ -89,6 +89,7 @@ Physical click path: `ScrollSuppressor` CGEventTap detects configured 3/4-finger
 - Settings window: app launch starts permission polling immediately; app activation/reopen focuses the existing settings window; `onDisappear` resets `isSettingsPresented` to `false`
 - Permissions revoked while running → `refreshPermissions()` stops the runtime
 - `SystemGestureManager.shared` handles selective save/disable/restore of system gesture preferences; `AppState` computes configured-slot conflicts before suppressing, passes full system-gesture settings so Dock keys only disable when all enabled vertical gestures are suppressed, and restores originals on runtime stop / app termination
+- Live config changes must only touch system-gesture suppression when the conflicting system-gesture key set actually changed; if suppression is already active, update the desired disabled/restored keys in one pass instead of restore→suppress bouncing the Dock twice
 - `SystemGestureManager.restoreIfNeeded()` runs at app launch to recover from a crash that left gestures suppressed
 - `PreemptionController` detects per-slot system gesture conflicts for currently configured Padium slots; UI warnings should ignore unbound slots and only reflect active conflicts
 
