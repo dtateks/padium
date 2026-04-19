@@ -380,14 +380,15 @@ final class AppState {
     }
 
     private func applySystemGestureSuppression() {
-        if systemGestureManager.isSuppressed {
-            systemGestureManager.restore()
-        }
-
         let configuredSlots = configuredGestureSlots()
         let allSettings = preemptionController.currentSystemGestureSettings()
         let conflictingSettings = preemptionController.conflictingSettings(for: configuredSlots)
-        guard !conflictingSettings.isEmpty else { return }
+        guard !conflictingSettings.isEmpty else {
+            if systemGestureManager.isSuppressed {
+                systemGestureManager.restore()
+            }
+            return
+        }
 
         systemGestureManager.suppress(conflictingSettings: conflictingSettings, allSettings: allSettings)
     }
@@ -401,6 +402,14 @@ final class AppState {
         let previousConfiguration = observedConfiguration
         guard currentConfiguration != previousConfiguration else { return }
 
+        let currentConflictingSettingKeys = Set(
+            preemptionController.conflictingSettings(for: currentConfiguration.configuredSlots).map(\.key)
+        )
+        let previousConflictingSettingKeys = Set(
+            preemptionController.conflictingSettings(for: previousConfiguration.configuredSlots).map(\.key)
+        )
+        let systemGestureSuppressionChanged = currentConflictingSettingKeys != previousConflictingSettingKeys
+
         observedConfiguration = currentConfiguration
 
         if currentConfiguration.gestureSensitivity != gestureSensitivity {
@@ -412,7 +421,7 @@ final class AppState {
         }
 
         gestureEngine.updateActiveSlots(currentConfiguration.configuredSlots)
-        if isTouchRuntimeActive {
+        if isTouchRuntimeActive, systemGestureSuppressionChanged {
             applySystemGestureSuppression()
         } else if coordinator.hasOutputAccess {
             startRuntimeIfNeeded()

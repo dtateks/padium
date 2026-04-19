@@ -44,12 +44,12 @@ final class SystemGestureManager {
     func suppress(conflictingSettings: [SystemGestureSetting], allSettings: [SystemGestureSetting]) {
         let disabledPreferenceKeys = Self.disabledPreferenceKeys(for: conflictingSettings, allSettings: allSettings)
         guard !disabledPreferenceKeys.trackpadKeys.isEmpty || !disabledPreferenceKeys.dockKeys.isEmpty else {
-            isSuppressed = false
+            restore()
             return
         }
 
-        saveBackup()
-        writeDisabledValues(trackpadKeys: disabledPreferenceKeys.trackpadKeys, dockKeys: disabledPreferenceKeys.dockKeys)
+        let backup = loadBackup() ?? captureBackup()
+        writeSuppressedValues(disabledPreferenceKeys, backup: backup)
         restartDock()
         isSuppressed = true
         PadiumLogger.gesture.info("System gestures suppressed")
@@ -77,7 +77,7 @@ final class SystemGestureManager {
 
     // MARK: - Backup persistence
 
-    private func saveBackup() {
+    private func captureBackup() -> [String: Any] {
         var backup: [String: Any] = [:]
 
         let trackpadPrefs = UserDefaults.standard.persistentDomain(forName: trackpadDomain) ?? [:]
@@ -91,6 +91,7 @@ final class SystemGestureManager {
         }
 
         UserDefaults.standard.set(backup, forKey: backupKey)
+        return backup
     }
 
     private func loadBackup() -> [String: Any]? {
@@ -103,12 +104,22 @@ final class SystemGestureManager {
 
     // MARK: - Write preferences
 
-    private func writeDisabledValues(trackpadKeys: Set<String>, dockKeys: Set<String>) {
-        for key in trackpadKeys {
-            shellDefaults(write: trackpadDomain, key: key, value: "-int 0")
+    private func writeSuppressedValues(
+        _ disabledPreferenceKeys: (trackpadKeys: Set<String>, dockKeys: Set<String>),
+        backup: [String: Any]
+    ) {
+        for key in Self.trackpadKeys {
+            let value = disabledPreferenceKeys.trackpadKeys.contains(key)
+                ? "-int 0"
+                : "-int \(backup["trackpad.\(key)"] as? Int ?? 0)"
+            shellDefaults(write: trackpadDomain, key: key, value: value)
         }
-        for key in dockKeys {
-            shellDefaults(write: dockDomain, key: key, value: "-bool false")
+
+        for key in Self.dockBoolKeys {
+            let value = disabledPreferenceKeys.dockKeys.contains(key)
+                ? "-bool false"
+                : "-bool \((backup["dock.\(key)"] as? Bool ?? true) ? "true" : "false")"
+            shellDefaults(write: dockDomain, key: key, value: value)
         }
     }
 
