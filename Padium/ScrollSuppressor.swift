@@ -409,25 +409,37 @@ final class ScrollSuppressor: @unchecked Sendable, PhysicalClickCoordinating, Mu
         }
 
         if Self.isSystemMenuBarClick(at: event.location) {
-            PadiumLogger.gesture.notice("Click pass-through: system menu bar")
+            PadiumLogger.gesture.notice(
+                "TAP-DIAG: click pass-through systemMenuBar fc=\(self._currentFingerCount) multitouch=\(self._multitouchActive) appInteraction=\(self._appInteractionActive)"
+            )
             os_unfair_lock_unlock(&_lock)
             return .passThrough
         }
 
         if _appInteractionActive {
-            PadiumLogger.gesture.notice("Click pass-through: Padium UI interaction active")
+            PadiumLogger.gesture.notice(
+                "TAP-DIAG: click pass-through appInteraction fc=\(self._currentFingerCount) multitouch=\(self._multitouchActive)"
+            )
             os_unfair_lock_unlock(&_lock)
             return .passThrough
         }
 
         let fingerCount = _currentFingerCount
         guard _multitouchActive, (3...4).contains(fingerCount) else {
+            if (3...4).contains(fingerCount) || _multitouchActive {
+                PadiumLogger.gesture.notice(
+                    "TAP-DIAG: click pass-through preconditions fc=\(fingerCount) multitouch=\(self._multitouchActive) appInteraction=\(self._appInteractionActive)"
+                )
+            }
             os_unfair_lock_unlock(&_lock)
             return .passThrough
         }
 
         let configuredSlots = configuredClickSlotsResolver(fingerCount)
         guard configuredSlots.single != nil || configuredSlots.double != nil else {
+            PadiumLogger.gesture.notice(
+                "TAP-DIAG: click pass-through noConfiguredSlots fc=\(fingerCount) multitouch=\(self._multitouchActive)"
+            )
             os_unfair_lock_unlock(&_lock)
             return .passThrough
         }
@@ -438,7 +450,9 @@ final class ScrollSuppressor: @unchecked Sendable, PhysicalClickCoordinating, Mu
 
         _leftMouseState = .suppressingHandledPair
         disposition = .suppress
-        PadiumLogger.gesture.notice("Click suppressed for configured physical gesture: fingerCount=\(fingerCount, privacy: .public)")
+        PadiumLogger.gesture.notice(
+            "TAP-DIAG: click handled fc=\(fingerCount, privacy: .public) single=\(configuredSlots.single?.rawValue ?? "nil", privacy: .public) double=\(configuredSlots.double?.rawValue ?? "nil", privacy: .public) clickState=\(clickState)"
+        )
 
         if let doubleSlot = configuredSlots.double,
            clickState >= 2 {
@@ -470,7 +484,7 @@ final class ScrollSuppressor: @unchecked Sendable, PhysicalClickCoordinating, Mu
         }
 
         if let eventToDispatch {
-            PadiumLogger.gesture.debug("TAP-DIAG: handled physical click fc=\(fingerCount) slot=\(eventToDispatch.slot.rawValue, privacy: .public)")
+            PadiumLogger.gesture.notice("TAP-DIAG: physical click dispatch fc=\(fingerCount) slot=\(eventToDispatch.slot.rawValue, privacy: .public)")
         }
         return disposition
     }
