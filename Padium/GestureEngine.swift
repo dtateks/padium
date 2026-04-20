@@ -446,6 +446,19 @@ final class GestureEngine {
         identifierFirstSeenAt: [Int: Date],
         using continuation: AsyncStream<GestureEvent>.Continuation
     ) {
+        // Minimum peak-duration gate: deliberate taps hold their peak
+        // finger count for ≥50 ms (libinput `tap-minimum-time` principle).
+        // Palm grazes from typing are capacitive flickers lasting 10-30 ms;
+        // asynchronous palm coincidences likewise hold their peak for one
+        // frame (~10 ms). Measured at the latest peak anchor — re-anchored
+        // on every peak upgrade and ID churn — so the floor counts time
+        // spent at the peak finger count, not total sequence life.
+        let liftDuration = candidate.duration(at: scheduler.now)
+        if liftDuration < GestureTapSettings.minimumStableDuration {
+            PadiumLogger.gesture.debug("TAP-DIAG: REJECTED tap minDuration fc=\(candidate.peakFingerCount) dur=\(liftDuration) min=\(GestureTapSettings.minimumStableDuration)")
+            return
+        }
+
         // Multi-finger concurrency gate: two contacts of a real one-hand tap
         // land within ~30-50ms. Palms at opposite trackpad corners while
         // typing land independently and typically exceed 80ms apart. Applied

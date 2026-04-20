@@ -258,7 +258,11 @@ struct GestureEngineTests {
         source: StubGestureSource,
         scheduler: ManualGestureScheduler,
         frames: [[TouchPoint]],
-        contactDuration: TimeInterval = 0.05
+        // Default tap duration mirrors a realistic light tap (~80 ms),
+        // above the engine's minimum-stable-duration floor. Tests that
+        // need to exercise the too-short-tap rejection path should pass
+        // a shorter `contactDuration` explicitly.
+        contactDuration: TimeInterval = 0.08
     ) async {
         for frame in frames {
             source.yieldFrame(frame)
@@ -1515,6 +1519,46 @@ struct GestureEngineTests {
         scheduler.advance(by: 0.02)
         source.yieldFrame([])
         await flushPipeline()
+
+        #expect(collector.events.isEmpty)
+
+        engine.stop()
+        await collectionTask.value
+    }
+
+    // Regression: palm grazes during typing are capacitive flickers that
+    // appear and vanish within 10-30 ms (palm never actually rests). Two
+    // such flickers inside the double-tap window must never emit
+    // twoFingerDoubleTap. Gated by `minimumStableDuration` — the same
+    // principle as libinput's `tap-minimum-time` — independent of any
+    // keyboard-activity heuristic.
+    @Test func briefPalmGrazeDoesNotEmitTwoFingerDoubleTap() async {
+        let source = StubGestureSource()
+        let scheduler = ManualGestureScheduler()
+        let engine = makeEngine(
+            source: source,
+            supportedSlots: [.twoFingerDoubleTap],
+            scheduler: scheduler
+        )
+        engine.start()
+
+        let collector = EventCollector()
+        let collectionTask = collector.collect(from: engine.events)
+
+        // Two grazes 20 ms long each — below minimumStableDuration (50 ms).
+        await performTap(
+            source: source,
+            scheduler: scheduler,
+            frames: makeTapFrames(fingerCount: 2),
+            contactDuration: 0.02
+        )
+        scheduler.advance(by: 0.10)
+        await performTap(
+            source: source,
+            scheduler: scheduler,
+            frames: makeTapFrames(fingerCount: 2),
+            contactDuration: 0.02
+        )
 
         #expect(collector.events.isEmpty)
 

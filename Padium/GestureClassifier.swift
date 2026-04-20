@@ -58,6 +58,16 @@ enum GestureTapSettings {
     // 500ms supports both light taps (~100ms) and physical clicks (~300-500ms).
     static let maximumDuration: TimeInterval = 0.5
     static let doubleTapWindow: TimeInterval = 0.3
+    // A deliberate finger tap lands and holds at its peak finger count for
+    // at least ~50 ms. Palm grazes from typing are capacitive flickers
+    // that appear and vanish within 10-30 ms because the palm never
+    // actually rests on the sensor. 50 ms sits below the light-tap floor
+    // (~80-120 ms observed on macOS trackpads) while rejecting flickers —
+    // the same principle as libinput's `tap-minimum-time`. Evaluated
+    // against the candidate's duration at its latest peak (re-anchored on
+    // every peak upgrade) so the floor measures time at peak finger count,
+    // not total sequence life.
+    static let minimumStableDuration: TimeInterval = 0.05
 
     static func currentMaximumTravel(userDefaults: UserDefaults = .standard) -> Float {
         GestureSensitivitySetting.currentTapTravelThreshold(userDefaults: userDefaults)
