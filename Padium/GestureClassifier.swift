@@ -119,20 +119,24 @@ struct GestureClassifier: Sendable {
     // `trackpadAspectRatio`). The rule: N fingers of a real gesture come from
     // ONE hand, so their mutual distances fit within hand reach; contacts that
     // come from two hands (e.g. palms resting on opposite corners while typing)
-    // exceed any plausible single-hand spread.
+    // exceed any plausible single-hand spread. Thresholds match real anatomy
+    // with modest headroom; they are the load-bearing palm/two-hand rejection
+    // gate alongside the wall-clock tap gates.
     //
     // Tuned on the smallest common trackpad (MacBook Air 13", ~12cm × 7.5cm):
-    //   - 2 fingers: typical index+middle spread ≤ ~3cm → ≈ 0.45 aspect-corrected.
-    //     0.70 admits even thumb+middle taps on large hands while rejecting
-    //     palms placed ≥ ~6cm apart.
-    //   - 3 fingers: index+middle+ring ≤ ~5cm → ≈ 0.80. 1.00 covers large hands
-    //     while rejecting palm+finger mixes and 2-palm+1-finger artefacts.
-    //   - 4+ fingers: natural hand spread on small trackpads can approach the
-    //     full width; direction-agreement and finger-identity stability carry
-    //     the load here, so no spread gate is imposed.
+    //   - 2 fingers: real index+middle spread 2-3 cm → ≈ 0.25-0.45 aspect-
+    //     corrected. 0.50 tightly admits adjacent-finger taps (including
+    //     some thumb+index variants) while rejecting any pair ≥ ~3.3 cm
+    //     apart — the canonical typing-palm false-positive geometry.
+    //   - 3 fingers: real index+middle+ring spread 3-5 cm → ≈ 0.45-0.75.
+    //     0.85 covers big hands while rejecting palm+2-finger artefacts.
+    //   - 4 fingers: real index+middle+ring+pinky spread 5-7 cm → ≈ 0.75-1.05.
+    //     1.20 covers big hands while rejecting any two-hand combination or
+    //     wide palm-heel artefact that reaches beyond natural hand width.
     private static let handSpreadThresholds: [Int: Float] = [
-        2: 0.70,
-        3: 1.00
+        2: 0.50,
+        3: 0.85,
+        4: 1.20
     ]
 
     // Three-finger swipes should keep roughly the same hand shape over the commit
@@ -296,8 +300,8 @@ struct GestureClassifier: Sendable {
     /// Rejects contact sets whose mutual spread exceeds one hand's reach —
     /// the load-bearing signal against two-handed palm artefacts (two palms on
     /// opposite corners of the trackpad while the user types). No threshold
-    /// is configured for 1-finger (spread is undefined) or 4+ fingers (natural
-    /// spread can approach the full trackpad on small devices).
+    /// is configured for 1-finger (spread is undefined). Thresholds for 2/3/4
+    /// fingers are tuned to real anatomical hand reach with modest headroom.
     static func contactsFitOneHand(_ contacts: [Int: TouchPoint]) -> Bool {
         guard let threshold = handSpreadThresholds[contacts.count] else { return true }
         let points = Array(contacts.values)

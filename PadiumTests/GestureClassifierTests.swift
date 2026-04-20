@@ -341,16 +341,31 @@ struct GestureClassifierTests {
         #expect(c.stableActiveContacts(in: normal) != nil)
     }
 
-    @Test func doesNotApplySpreadCheckToFourFingerContacts() {
+    @Test func fourFingerContactsFittingOneHandAreAccepted() {
         let c = makeClassifier()
-        // A wide 4-finger gesture on a small trackpad can span almost the full width.
-        // Direction-agreement carries the load here, not spread.
+        // Real one-hand 4-finger swipe span: index-to-pinky ~5-7 cm on a
+        // 12 cm × 7.5 cm trackpad → ≈ 0.90 aspect-corrected, comfortably
+        // below the 1.20 ceiling.
+        let natural = [
+            pt(id: 1, x: 0.30, y: 0.50),
+            pt(id: 2, x: 0.45, y: 0.50),
+            pt(id: 3, x: 0.60, y: 0.50),
+            pt(id: 4, x: 0.75, y: 0.50)
+        ]
+        #expect(c.stableActiveContacts(in: natural) != nil)
+    }
+
+    @Test func fourFingerContactsExceedingOneHandReachAreRejected() {
+        let c = makeClassifier()
+        // Two-hand or palm-heel artefact spanning almost the full trackpad:
+        // 0.05→0.95 = 0.90 × 1.5 = 1.35 aspect-corrected, above the 1.20
+        // one-hand ceiling. Real anatomy cannot reach this span.
         let wide = [
             pt(id: 1, x: 0.05, y: 0.50),
             pt(id: 2, x: 0.35, y: 0.50),
             pt(id: 3, x: 0.65, y: 0.50),
             pt(id: 4, x: 0.95, y: 0.50)
         ]
-        #expect(c.stableActiveContacts(in: wide) != nil)
+        #expect(c.stableActiveContacts(in: wide) == nil)
     }
 }
