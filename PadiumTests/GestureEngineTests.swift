@@ -414,6 +414,38 @@ struct GestureEngineTests {
         #expect(receivedFrames.last?.first?.identifier == 2)
     }
 
+    @Test func multitouchSourceEmitsLiftForDeviceResetBeforeSameDeviceIDFrames() async {
+        let monitor = StubMultitouchFrameMonitor()
+        let source = MultitouchGestureSource(monitor: monitor)
+
+        do {
+            try source.startListening()
+        } catch {
+            Issue.record("Expected source to start: \(String(describing: error))")
+            return
+        }
+
+        let collector = Task { () -> [[TouchPoint]] in
+            var frames: [[TouchPoint]] = []
+            for await frame in source.touchFrameStream {
+                frames.append(frame)
+            }
+            return frames
+        }
+
+        monitor.emit(deviceID: 10, points: [makeSourcePoint(identifier: 1, x: 0.20, y: 0.50)])
+        monitor.emitDeviceReset()
+        monitor.emit(deviceID: 10, points: [makeSourcePoint(identifier: 2, x: 0.72, y: 0.52)])
+        await flushPipeline()
+        source.stopListening()
+
+        let receivedFrames = await collector.value
+        #expect(receivedFrames.count == 3)
+        #expect(receivedFrames.map(\.count) == [1, 0, 1])
+        #expect(receivedFrames.first?.first?.identifier == 1)
+        #expect(receivedFrames.last?.first?.identifier == 2)
+    }
+
     // MARK: - start() lifecycle (non-throwing, CRIT-02)
 
     @Test func startReturnsTrueWhenSourceSucceeds() {

@@ -1,6 +1,7 @@
 #import "MultitouchBridge.h"
 
 #import <dlfcn.h>
+#import <IOKit/IOKitLib.h>
 #import <os/lock.h>
 #import <os/log.h>
 
@@ -44,8 +45,8 @@ typedef void (*MTRegisterContactFrameCallbackFn)(MTDeviceRef, MTFrameCallbackFun
 typedef void (*MTUnregisterContactFrameCallbackFn)(MTDeviceRef, MTFrameCallbackFunction);
 typedef void (*MTDeviceStartFn)(MTDeviceRef, int);
 typedef void (*MTDeviceStopFn)(MTDeviceRef);
-typedef void (*MTDeviceReleaseFn)(MTDeviceRef);
 typedef int32_t (*MTDeviceGetDeviceIDFn)(MTDeviceRef, uint64_t *);
+typedef io_service_t (*MTDeviceGetServiceFn)(MTDeviceRef);
 
 typedef struct {
     MTDeviceIsAvailableFn deviceIsAvailable;
@@ -54,11 +55,12 @@ typedef struct {
     MTUnregisterContactFrameCallbackFn unregisterContactFrameCallback;
     MTDeviceStartFn deviceStart;
     MTDeviceStopFn deviceStop;
-    MTDeviceReleaseFn deviceRelease;
     MTDeviceGetDeviceIDFn deviceGetDeviceID;
+    MTDeviceGetServiceFn deviceGetService;
 } PadiumMultitouchSymbols;
 
 static const char *PadiumMultitouchLibraryPath = "/System/Library/PrivateFrameworks/MultitouchSupport.framework/MultitouchSupport";
+static const char *PadiumMultitouchServiceName = "AppleMultitouchDevice";
 static const int64_t PadiumDeviceRefreshIntervalNanoseconds = NSEC_PER_SEC;
 static const int64_t PadiumDeviceRefreshLeewayNanoseconds = NSEC_PER_SEC / 5;
 static char PadiumMultitouchBridgeCallbackQueueKey;
@@ -129,6 +131,12 @@ static os_log_t PadiumGestureLog(void) {
 @property (nonatomic, assign) BOOL isRunning;
 @property (nonatomic, strong) dispatch_queue_t callbackQueue;
 @property (nonatomic, strong, nullable) dispatch_source_t deviceRefreshTimer;
+@property (nonatomic, assign) IONotificationPortRef deviceNotificationPort;
+@property (nonatomic, assign) io_iterator_t deviceMatchedIterator;
+@property (nonatomic, assign) io_iterator_t deviceTerminatedIterator;
+
+- (void)handleDeviceTopologyNotification:(io_iterator_t)iterator;
+- (nullable NSString *)registrationIdentityForDevice:(MTDeviceRef)device symbols:(PadiumMultitouchSymbols)symbols;
 @end
 
 @implementation PadiumMultitouchBridge
@@ -155,8 +163,8 @@ static PadiumMultitouchSymbols PadiumLoadedSymbols(void) {
         symbols.unregisterContactFrameCallback = (MTUnregisterContactFrameCallbackFn)PadiumResolveMultitouchSymbol("MTUnregisterContactFrameCallback");
         symbols.deviceStart = (MTDeviceStartFn)PadiumResolveMultitouchSymbol("MTDeviceStart");
         symbols.deviceStop = (MTDeviceStopFn)PadiumResolveMultitouchSymbol("MTDeviceStop");
-        symbols.deviceRelease = (MTDeviceReleaseFn)PadiumResolveMultitouchSymbol("MTDeviceRelease");
         symbols.deviceGetDeviceID = (MTDeviceGetDeviceIDFn)PadiumResolveMultitouchSymbol("MTDeviceGetDeviceID");
+        symbols.deviceGetService = (MTDeviceGetServiceFn)PadiumResolveMultitouchSymbol("MTDeviceGetService");
     });
     return symbols;
 }
@@ -168,6 +176,11 @@ static void PadiumMultitouchContactFrameCallback(MTDeviceRef device, MTTouch tou
     PadiumMultitouchBridge *bridge = sActiveBridge;
     os_unfair_lock_unlock(&sActiveBridgeLock);
     [bridge handleFrameFromDevice:device touches:touches touchCount:numTouches];
+}
+
+static void PadiumMultitouchDeviceNotification(void *refcon, io_iterator_t iterator) {
+    PadiumMultitouchBridge *bridge = (__bridge PadiumMultitouchBridge *)refcon;
+    [bridge handleDeviceTopologyNotification:iterator];
 }
 
 - (instancetype)initWithFrameHandler:(PadiumMultitouchFrameHandler)frameHandler {
@@ -222,14 +235,9 @@ static void PadiumMultitouchContactFrameCallback(MTDeviceRef device, MTTouch tou
 
     self.isRunning = YES;
     [self setActiveBridgeToSelf];
-    [self refreshDeviceRegistrationsOnCallbackQueueWithSymbols:symbols force:YES];
-    if (self.activeDevices.count == 0) {
-        self.isRunning = NO;
-        [self clearActiveBridgeIfNeeded];
-        return NO;
-    }
-
+    [self startDeviceNotificationsOnCallbackQueue];
     [self startDeviceRefreshTimerOnCallbackQueue];
+    [self refreshDeviceRegistrationsOnCallbackQueueWithSymbols:symbols force:YES];
     return YES;
 }
 
@@ -237,6 +245,7 @@ static void PadiumMultitouchContactFrameCallback(MTDeviceRef device, MTTouch tou
     if (!self.isRunning) { return; }
 
     [self stopDeviceRefreshTimerOnCallbackQueue];
+    [self stopDeviceNotificationsOnCallbackQueue];
 
     PadiumMultitouchSymbols symbols = PadiumLoadedSymbols();
     [self stopActiveDevicesOnCallbackQueueWithSymbols:symbols];
@@ -282,6 +291,82 @@ static void PadiumMultitouchContactFrameCallback(MTDeviceRef device, MTTouch tou
     self.deviceRefreshTimer = nil;
 }
 
+- (void)startDeviceNotificationsOnCallbackQueue {
+    if (self.deviceNotificationPort != NULL) { return; }
+
+    IONotificationPortRef notificationPort = IONotificationPortCreate(kIOMainPortDefault);
+    if (notificationPort == NULL) {
+        os_log_error(PadiumGestureLog(), "Failed to create multitouch device notification port");
+        return;
+    }
+
+    IONotificationPortSetDispatchQueue(notificationPort, self.callbackQueue);
+    self.deviceNotificationPort = notificationPort;
+
+    kern_return_t matchedResult = IOServiceAddMatchingNotification(
+        notificationPort,
+        kIOMatchedNotification,
+        IOServiceMatching(PadiumMultitouchServiceName),
+        PadiumMultitouchDeviceNotification,
+        (__bridge void *)self,
+        &_deviceMatchedIterator
+    );
+    if (matchedResult != KERN_SUCCESS) {
+        os_log_error(PadiumGestureLog(), "Failed to observe multitouch device matches: %{public}d", matchedResult);
+        [self stopDeviceNotificationsOnCallbackQueue];
+        return;
+    }
+    [self drainDeviceIteratorOnCallbackQueue:self.deviceMatchedIterator];
+
+    kern_return_t terminatedResult = IOServiceAddMatchingNotification(
+        notificationPort,
+        kIOTerminatedNotification,
+        IOServiceMatching(PadiumMultitouchServiceName),
+        PadiumMultitouchDeviceNotification,
+        (__bridge void *)self,
+        &_deviceTerminatedIterator
+    );
+    if (terminatedResult != KERN_SUCCESS) {
+        os_log_error(PadiumGestureLog(), "Failed to observe multitouch device terminations: %{public}d", terminatedResult);
+        [self stopDeviceNotificationsOnCallbackQueue];
+        return;
+    }
+    [self drainDeviceIteratorOnCallbackQueue:self.deviceTerminatedIterator];
+}
+
+- (void)stopDeviceNotificationsOnCallbackQueue {
+    if (self.deviceMatchedIterator != IO_OBJECT_NULL) {
+        IOObjectRelease(self.deviceMatchedIterator);
+        self.deviceMatchedIterator = IO_OBJECT_NULL;
+    }
+    if (self.deviceTerminatedIterator != IO_OBJECT_NULL) {
+        IOObjectRelease(self.deviceTerminatedIterator);
+        self.deviceTerminatedIterator = IO_OBJECT_NULL;
+    }
+    if (self.deviceNotificationPort != NULL) {
+        IONotificationPortDestroy(self.deviceNotificationPort);
+        self.deviceNotificationPort = NULL;
+    }
+}
+
+- (void)handleDeviceTopologyNotification:(io_iterator_t)iterator {
+    BOOL didObserveDeviceChange = [self drainDeviceIteratorOnCallbackQueue:iterator];
+    if (!didObserveDeviceChange || !self.isRunning) { return; }
+
+    PadiumMultitouchSymbols symbols = PadiumLoadedSymbols();
+    [self refreshDeviceRegistrationsOnCallbackQueueWithSymbols:symbols force:YES];
+}
+
+- (BOOL)drainDeviceIteratorOnCallbackQueue:(io_iterator_t)iterator {
+    BOOL didObserveDevice = NO;
+    io_object_t service = IO_OBJECT_NULL;
+    while ((service = IOIteratorNext(iterator)) != IO_OBJECT_NULL) {
+        didObserveDevice = YES;
+        IOObjectRelease(service);
+    }
+    return didObserveDevice;
+}
+
 - (void)refreshDeviceRegistrationsOnCallbackQueueWithSymbols:(PadiumMultitouchSymbols)symbols force:(BOOL)force {
     if (![self hasRequiredSymbols:symbols]) { return; }
 
@@ -306,8 +391,8 @@ static void PadiumMultitouchContactFrameCallback(MTDeviceRef device, MTTouch tou
 }
 
 - (BOOL)activeDevicesMatchDevices:(NSArray *)devices symbols:(PadiumMultitouchSymbols)symbols {
-    NSArray<NSNumber *> *activeSignature = [self stableDeviceSignatureForDevices:self.activeDevices symbols:symbols];
-    NSArray<NSNumber *> *newSignature = [self stableDeviceSignatureForDevices:devices symbols:symbols];
+    NSArray<NSString *> *activeSignature = [self deviceRegistrationSignatureForDevices:self.activeDevices symbols:symbols];
+    NSArray<NSString *> *newSignature = [self deviceRegistrationSignatureForDevices:devices symbols:symbols];
     if (activeSignature != nil && newSignature != nil) {
         return [activeSignature isEqualToArray:newSignature];
     }
@@ -315,20 +400,37 @@ static void PadiumMultitouchContactFrameCallback(MTDeviceRef device, MTTouch tou
     return self.activeDevices.count == devices.count;
 }
 
-- (NSArray<NSNumber *> *)stableDeviceSignatureForDevices:(NSArray *)devices symbols:(PadiumMultitouchSymbols)symbols {
-    if (symbols.deviceGetDeviceID == NULL) { return nil; }
-
-    NSMutableArray<NSNumber *> *deviceIDs = [NSMutableArray arrayWithCapacity:devices.count];
+- (NSArray<NSString *> *)deviceRegistrationSignatureForDevices:(NSArray *)devices symbols:(PadiumMultitouchSymbols)symbols {
+    NSMutableArray<NSString *> *deviceSignatures = [NSMutableArray arrayWithCapacity:devices.count];
     for (id device in devices) {
-        uint64_t resolvedDeviceID = 0;
         MTDeviceRef mtDevice = (__bridge MTDeviceRef)device;
-        if (symbols.deviceGetDeviceID(mtDevice, &resolvedDeviceID) != 0) {
+        NSString *deviceSignature = [self registrationIdentityForDevice:mtDevice symbols:symbols];
+        if (deviceSignature == nil) {
             return nil;
         }
-        [deviceIDs addObject:@(resolvedDeviceID)];
+        [deviceSignatures addObject:deviceSignature];
     }
 
-    return [deviceIDs sortedArrayUsingSelector:@selector(compare:)];
+    return [deviceSignatures sortedArrayUsingSelector:@selector(compare:)];
+}
+
+- (nullable NSString *)registrationIdentityForDevice:(MTDeviceRef)device symbols:(PadiumMultitouchSymbols)symbols {
+    if (symbols.deviceGetService != NULL) {
+        io_service_t service = symbols.deviceGetService(device);
+        uint64_t registryEntryID = 0;
+        if (service != IO_OBJECT_NULL && IORegistryEntryGetRegistryEntryID(service, &registryEntryID) == KERN_SUCCESS) {
+            return [NSString stringWithFormat:@"service:%llu", (unsigned long long)registryEntryID];
+        }
+    }
+
+    if (symbols.deviceGetDeviceID != NULL) {
+        uint64_t resolvedDeviceID = 0;
+        if (symbols.deviceGetDeviceID(device, &resolvedDeviceID) == 0) {
+            return [NSString stringWithFormat:@"device:%llu", (unsigned long long)resolvedDeviceID];
+        }
+    }
+
+    return nil;
 }
 
 - (NSArray *)startDevicesOnCallbackQueue:(NSArray *)devices symbols:(PadiumMultitouchSymbols)symbols {
@@ -359,9 +461,6 @@ static void PadiumMultitouchContactFrameCallback(MTDeviceRef device, MTTouch tou
             }
             if (symbols.deviceStop != NULL) {
                 symbols.deviceStop(mtDevice);
-            }
-            if (symbols.deviceRelease != NULL) {
-                symbols.deviceRelease(mtDevice);
             }
         } @catch (NSException *exception) {
             os_log_error(PadiumGestureLog(),
