@@ -6,7 +6,10 @@ struct MultitouchDeviceFrame: Sendable {
 }
 
 protocol MultitouchFrameMonitoring: AnyObject, Sendable {
-    func startListening(onFrame: @escaping @Sendable (MultitouchDeviceFrame) -> Void) -> Bool
+    func startListening(
+        onFrame: @escaping @Sendable (MultitouchDeviceFrame) -> Void,
+        onDeviceReset: @escaping @Sendable () -> Void
+    ) -> Bool
     func stopListening()
 }
 
@@ -36,11 +39,18 @@ final class MultitouchGestureSource: GestureSource, @unchecked Sendable {
             activeDeviceID = nil
         }
 
-        let started = monitor.startListening { [weak self] frame in
-            self?.processingQueue.async { [weak self] in
-                self?.handle(frame)
+        let started = monitor.startListening(
+            onFrame: { [weak self] frame in
+                self?.processingQueue.async { [weak self] in
+                    self?.handle(frame)
+                }
+            },
+            onDeviceReset: { [weak self] in
+                self?.processingQueue.async { [weak self] in
+                    self?.handleDeviceReset()
+                }
             }
-        }
+        )
 
         guard started else {
             processingQueue.sync {
@@ -74,6 +84,14 @@ final class MultitouchGestureSource: GestureSource, @unchecked Sendable {
         continuation.yield(frame.points)
     }
 
+    private func handleDeviceReset() {
+        guard let continuation = activeContinuation else { return }
+        if activeDeviceID != nil {
+            continuation.yield([])
+        }
+        activeDeviceID = nil
+    }
+
     private func shouldEmit(_ frame: MultitouchDeviceFrame) -> Bool {
         if frame.points.isEmpty {
             guard let activeDeviceID, activeDeviceID == frame.deviceID else {
@@ -97,23 +115,34 @@ enum MultitouchGestureSourceError: Error {
 }
 
 final class MultitouchBridgeMonitor: MultitouchFrameMonitoring, @unchecked Sendable {
-    private lazy var bridge = PadiumMultitouchBridge { [weak self] frame in
-        self?.handle(frame)
-    }
+    private lazy var bridge = PadiumMultitouchBridge(
+        frameHandler: { [weak self] frame in
+            self?.handle(frame)
+        },
+        deviceResetHandler: { [weak self] in
+            self?.handleDeviceReset()
+        }
+    )
     private let stateLock = NSLock()
     private var frameHandler: (@Sendable (MultitouchDeviceFrame) -> Void)?
+    private var deviceResetHandler: (@Sendable () -> Void)?
 
     init() {}
 
-    func startListening(onFrame: @escaping @Sendable (MultitouchDeviceFrame) -> Void) -> Bool {
+    func startListening(
+        onFrame: @escaping @Sendable (MultitouchDeviceFrame) -> Void,
+        onDeviceReset: @escaping @Sendable () -> Void
+    ) -> Bool {
         stateLock.lock()
         frameHandler = onFrame
+        deviceResetHandler = onDeviceReset
         stateLock.unlock()
 
         let started = bridge.startListening()
         if !started {
             stateLock.lock()
             frameHandler = nil
+            deviceResetHandler = nil
             stateLock.unlock()
         }
         return started
@@ -124,6 +153,7 @@ final class MultitouchBridgeMonitor: MultitouchFrameMonitoring, @unchecked Senda
 
         stateLock.lock()
         frameHandler = nil
+        deviceResetHandler = nil
         stateLock.unlock()
     }
 
@@ -145,6 +175,13 @@ final class MultitouchBridgeMonitor: MultitouchFrameMonitoring, @unchecked Senda
         let handler = frameHandler
         stateLock.unlock()
         handler?(deviceFrame)
+    }
+
+    private func handleDeviceReset() {
+        stateLock.lock()
+        let handler = deviceResetHandler
+        stateLock.unlock()
+        handler?()
     }
 }
 

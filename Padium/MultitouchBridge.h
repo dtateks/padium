@@ -46,10 +46,13 @@ typedef NS_ENUM(NSInteger, PadiumMultitouchContactState) {
 @end
 
 typedef void (^PadiumMultitouchFrameHandler)(PadiumMultitouchFrame *frame);
+typedef void (^PadiumMultitouchDeviceResetHandler)(void);
 
 @interface PadiumMultitouchBridge : NSObject
 
-- (instancetype)initWithFrameHandler:(PadiumMultitouchFrameHandler)frameHandler NS_DESIGNATED_INITIALIZER;
+- (instancetype)initWithFrameHandler:(PadiumMultitouchFrameHandler)frameHandler;
+- (instancetype)initWithFrameHandler:(PadiumMultitouchFrameHandler)frameHandler
+                  deviceResetHandler:(nullable PadiumMultitouchDeviceResetHandler)deviceResetHandler NS_DESIGNATED_INITIALIZER;
 - (instancetype)init NS_UNAVAILABLE;
 
 - (BOOL)startListening;
