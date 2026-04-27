@@ -1,6 +1,6 @@
 <!-- Scoped to Padium/ source directory. Root AGENTS.md covers architecture, contracts, and conventions. -->
 
-**Updated:** 2026-04-19 19:03
+**Updated:** 2026-04-27 08:10
 **Commit:** working tree
 **Branch:** main
 
@@ -15,8 +15,8 @@
 | GestureSource.swift | Protocol + types | `GestureSource` protocol, `TouchPoint` struct, `TouchState` enum — boundary above private bridge |
 | GestureEvent.swift | Data | `GestureEvent(slot:timestamp:)` — emitted by engine |
 | GestureSlot.swift | Enum | Gesture slots include 1-finger and 2-finger double-tap, legacy 3/4 click+dbl-click slots (stable raw values for persisted config), and dedicated 3/4 touch tap+dbl-tap slots; `displayName`/`sectionTitle` for UI grouping |
-| MultitouchGestureSource.swift | Hardware bridge | `MultitouchBridgeMonitor` + active-device arbitration (single owner until lift) → `AsyncStream<[TouchPoint]>`, `@unchecked Sendable` |
-| MultitouchBridge.{h,m} | Private framework adapter | Enumerates `MTDeviceCreateList()` devices, registers callbacks, and forwards `deviceID` + contacts to Swift |
+| MultitouchGestureSource.swift | Hardware bridge | `MultitouchBridgeMonitor` + active-device arbitration (single owner until lift or bridge device reset) → `AsyncStream<[TouchPoint]>`, `@unchecked Sendable` |
+| MultitouchBridge.{h,m} | Private framework adapter | Enumerates `MTDeviceCreateList()` devices, polls for hotplug changes, registers callbacks, and forwards `deviceID` + contacts to Swift |
 | ShortcutEmitter.swift | Key posting | `CGEventShortcutSender` posts explicit modifier transitions + key events via `.cghidEventTap` |
 | ShortcutRegistry.swift | Name mapping | `"gesture.\(slot.rawValue)"` pattern — single source of truth |
 | PermissionCoordinator.swift | Permissions | `PermissionState` + `permissionState/inputMonitoringState/postEventState`, `requestMissingPermissions()` |
@@ -31,7 +31,8 @@
 
 # Module-Specific Gotchas
 - `MultitouchGestureSource` is `@unchecked Sendable` — callback processing is serialized on a dedicated queue; keep device arbitration and continuation access on that queue
-- `MultitouchGestureSource` accepts frames from exactly one device until it reports empty points, then switches ownership to a newly active device on the next non-empty frame
+- `MultitouchGestureSource` accepts frames from exactly one device until it reports empty points or the bridge reports a device reset, then switches ownership to a newly active device on the next non-empty frame
+- `MultitouchBridge` polls `MTDeviceCreateList()` while listening because public MultitouchSupport consumers handle trackpad hotplug by re-enumeration rather than native attach/detach callbacks; topology changes must reset Swift source arbitration before new frames are accepted
 - `GestureClassifier` applies a +20 point base boost before threshold mapping; swipe thresholds range 0.04-0.10 (previous 0.06-0.14), touch-tap travel thresholds range 0.04-0.07, and both use the same live shared sensitivity curve without an AppState runtime restart
 - Palm rejection is geometric only: `GestureClassifier.stableActiveContacts` rejects contacts whose aspect-corrected pairwise spread exceeds one-hand reach — 2-finger 0.50, 3-finger 0.85, 4-finger 1.20 — catching two-palm-at-corners artefacts without any keyboard-activity heuristic
 - `GestureClassifier.tapCandidateMaintainsShape` is the tap-specific palm/corner filter for 2-finger double taps: it compares the aspect-corrected pair vector between the first and latest stable contacts and should stay permissive enough for moderate real finger drift
