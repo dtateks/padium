@@ -1,5 +1,111 @@
-import SwiftUI
+import ApplicationServices
 import KeyboardShortcuts
+import ServiceManagement
+import SwiftUI
+
+private let settingsWindowSceneID = "settings"
+private let settingsWindowValue = "settings"
+
+enum LaunchAtLoginRegistrationResult: Equatable {
+    case enabled
+    case requiresApproval
+    case failed
+}
+
+@MainActor
+protocol LaunchAtLoginControlling: AnyObject {
+    var wasLaunchedAtLogin: Bool { get }
+    func ensureEnabled() -> LaunchAtLoginRegistrationResult
+    func openSystemSettings()
+}
+
+protocol LoginItemServiceControlling {
+    var status: SMAppService.Status { get }
+    func register() throws
+}
+
+extension SMAppService: LoginItemServiceControlling {}
+
+@MainActor
+final class LaunchAtLoginManager: LaunchAtLoginControlling {
+    private let service: any LoginItemServiceControlling
+    private let appleEventProvider: () -> NSAppleEventDescriptor?
+    private let systemSettingsOpener: () -> Void
+
+    init(
+        service: any LoginItemServiceControlling = SMAppService.mainApp,
+        appleEventProvider: @escaping () -> NSAppleEventDescriptor? = { NSAppleEventManager.shared().currentAppleEvent },
+        systemSettingsOpener: @escaping () -> Void = SMAppService.openSystemSettingsLoginItems
+    ) {
+        self.service = service
+        self.appleEventProvider = appleEventProvider
+        self.systemSettingsOpener = systemSettingsOpener
+    }
+
+    var wasLaunchedAtLogin: Bool {
+        guard let event = appleEventProvider() else {
+            return false
+        }
+
+        return event.eventID == AEEventID(kAEOpenApplication)
+            && event.paramDescriptor(forKeyword: AEKeyword(keyAEPropData))?.enumCodeValue == keyAELaunchedAsLogInItem
+    }
+
+    func ensureEnabled() -> LaunchAtLoginRegistrationResult {
+        switch service.status {
+        case .enabled:
+            return .enabled
+        case .requiresApproval:
+            PadiumLogger.permission.notice("Launch at login requires user approval in System Settings")
+            return .requiresApproval
+        case .notRegistered, .notFound:
+            return registerMainApp()
+        @unknown default:
+            PadiumLogger.permission.error(
+                "Launch at login has unexpected status: \(String(describing: self.service.status), privacy: .public)"
+            )
+            return .failed
+        }
+    }
+
+    func openSystemSettings() {
+        systemSettingsOpener()
+    }
+
+    private func registerMainApp() -> LaunchAtLoginRegistrationResult {
+        do {
+            try service.register()
+        } catch {
+            return registrationResult(after: error)
+        }
+
+        return registrationResult(after: nil)
+    }
+
+    private func registrationResult(after error: (any Error)?) -> LaunchAtLoginRegistrationResult {
+        switch service.status {
+        case .enabled:
+            return .enabled
+        case .requiresApproval:
+            PadiumLogger.permission.notice("Launch at login requires user approval in System Settings")
+            return .requiresApproval
+        case .notRegistered, .notFound:
+            if let error {
+                PadiumLogger.permission.error(
+                    "Failed to enable launch at login: \(error.localizedDescription, privacy: .public)"
+                )
+            } else {
+                PadiumLogger.permission.error("Launch at login registration did not enable the main app")
+            }
+            return .failed
+        @unknown default:
+            PadiumLogger.permission.error(
+                "Launch at login has unexpected post-registration status: \(String(describing: self.service.status), privacy: .public)"
+            )
+            return .failed
+        }
+    }
+}
 
 @main
 struct PadiumApp: App {
@@ -62,7 +168,7 @@ struct PadiumApp: App {
     }
 
     var body: some Scene {
-        Window("Padium", id: "settings") {
+        WindowGroup("Padium", id: settingsWindowSceneID, for: String.self) { _ in
             SettingsContentView(appState: appState)
                 .background(SettingsWindowBridge(appDelegate: appDelegate))
                 .onAppear {
@@ -72,9 +178,12 @@ struct PadiumApp: App {
                 .onDisappear {
                     appState.isSettingsPresented = false
                 }
+        } defaultValue: {
+            settingsWindowValue
         }
         .windowResizability(.contentSize)
         .commands {
+            CommandGroup(replacing: .newItem) {}
             CommandGroup(replacing: .textEditing) {}
             CommandGroup(replacing: .undoRedo) {}
             CommandGroup(replacing: .pasteboard) {}
@@ -88,9 +197,13 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     var showSettingsWindow: (() -> Void)?
     var rememberFrontmostApplicationHandler: (() -> Void)?
     var restorePreviousApplicationHandler: (() -> Void)?
+    var closeStartupWindowsHandler: (() -> Void)?
+    var launchAtLoginController: any LaunchAtLoginControlling = LaunchAtLoginManager()
 
     private weak var observedSettingsWindow: NSWindow?
     private var previouslyFrontmostExternalApplication: NSRunningApplication?
+    private var shouldAutoOpenSettingsWindow = true
+    private var hasPendingLaunchAtLoginApproval = false
 
     override init() {
         super.init()
@@ -103,16 +216,39 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        let launchedAtLogin = launchAtLoginController.wasLaunchedAtLogin
+        shouldAutoOpenSettingsWindow = !launchedAtLogin
+
+        if launchAtLoginController.ensureEnabled() == .requiresApproval {
+            hasPendingLaunchAtLoginApproval = launchedAtLogin
+            if !launchedAtLogin {
+                launchAtLoginController.openSystemSettings()
+            }
+        }
+
+        guard shouldAutoOpenSettingsWindow else {
+            closeStartupWindows()
+            return
+        }
+
         openSettingsWindow()
     }
 
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        if hasPendingLaunchAtLoginApproval {
+            hasPendingLaunchAtLoginApproval = false
+            shouldAutoOpenSettingsWindow = true
+            launchAtLoginController.openSystemSettings()
+        }
+
         openSettingsWindow()
         return true
     }
 
     func applicationDidBecomeActive(_ notification: Notification) {
         appState?.refreshPermissions()
+
+        guard shouldAutoOpenSettingsWindow else { return }
         guard !(appState?.isSettingsPresented ?? false) else { return }
         openSettingsWindow()
     }
@@ -189,6 +325,19 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         appState?.setAppInteractionActive(isActive)
     }
 
+    private func closeStartupWindows() {
+        if let closeStartupWindowsHandler {
+            closeStartupWindowsHandler()
+            return
+        }
+
+        Task { @MainActor in
+            for window in NSApplication.shared.windows {
+                window.close()
+            }
+        }
+    }
+
     private func removeSettingsWindowObservers() {
         guard let observedSettingsWindow else { return }
         NotificationCenter.default.removeObserver(self, name: NSWindow.didBecomeKeyNotification, object: observedSettingsWindow)
@@ -230,7 +379,7 @@ private struct SettingsWindowBridge: View {
             .background(SettingsWindowObserver(appDelegate: appDelegate))
             .onAppear {
                 appDelegate.showSettingsWindow = { [openWindow] in
-                    openWindow(id: "settings")
+                    openWindow(id: settingsWindowSceneID, value: settingsWindowValue)
                     focusSettingsWindow()
                 }
             }

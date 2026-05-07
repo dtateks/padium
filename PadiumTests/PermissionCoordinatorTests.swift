@@ -4,6 +4,7 @@ import AppKit
 import ApplicationServices
 import Foundation
 import KeyboardShortcuts
+import ServiceManagement
 
 private struct GestureConfigurationSnapshot {
     private static let sensitivityKey = "gesture.sensitivity"
@@ -157,15 +158,66 @@ struct AppDelegateTests {
 
     @Test func applicationDidFinishLaunchingRemembersFrontmostApplicationBeforeOpeningSettingsWindow() {
         let delegate = AppDelegate()
+        let launchAtLoginController = RecordingLaunchAtLoginController()
         var rememberCount = 0
         var openCount = 0
+        var closeStartupWindowsCount = 0
+        delegate.launchAtLoginController = launchAtLoginController
         delegate.rememberFrontmostApplicationHandler = { rememberCount += 1 }
+        delegate.showSettingsWindow = { openCount += 1 }
+        delegate.closeStartupWindowsHandler = { closeStartupWindowsCount += 1 }
+
+        delegate.applicationDidFinishLaunching(Notification(name: NSApplication.didFinishLaunchingNotification))
+
+        #expect(launchAtLoginController.ensureEnabledCallCount == 1)
+        #expect(rememberCount == 1)
+        #expect(openCount == 1)
+        #expect(closeStartupWindowsCount == 0)
+    }
+
+    @Test func applicationDidFinishLaunchingSkipsSettingsWindowWhenLaunchedAtLogin() {
+        let delegate = AppDelegate()
+        let launchAtLoginController = RecordingLaunchAtLoginController()
+        launchAtLoginController.wasLaunchedAtLogin = true
+        var closeStartupWindowsCount = 0
+        delegate.launchAtLoginController = launchAtLoginController
+        delegate.closeStartupWindowsHandler = { closeStartupWindowsCount += 1 }
+
+        var openCount = 0
         delegate.showSettingsWindow = { openCount += 1 }
 
         delegate.applicationDidFinishLaunching(Notification(name: NSApplication.didFinishLaunchingNotification))
 
-        #expect(rememberCount == 1)
-        #expect(openCount == 1)
+        #expect(launchAtLoginController.ensureEnabledCallCount == 1)
+        #expect(openCount == 0)
+        #expect(closeStartupWindowsCount == 1)
+    }
+
+    @Test func applicationDidFinishLaunchingOpensSystemSettingsWhenLaunchAtLoginNeedsApproval() {
+        let delegate = AppDelegate()
+        let launchAtLoginController = RecordingLaunchAtLoginController()
+        launchAtLoginController.ensureEnabledResult = .requiresApproval
+        delegate.launchAtLoginController = launchAtLoginController
+
+        delegate.applicationDidFinishLaunching(Notification(name: NSApplication.didFinishLaunchingNotification))
+
+        #expect(launchAtLoginController.openSystemSettingsCallCount == 1)
+    }
+
+    @Test func applicationDidFinishLaunchingDefersSystemSettingsWhenLoginLaunchNeedsApproval() {
+        let delegate = AppDelegate()
+        let launchAtLoginController = RecordingLaunchAtLoginController()
+        launchAtLoginController.wasLaunchedAtLogin = true
+        launchAtLoginController.ensureEnabledResult = .requiresApproval
+        delegate.launchAtLoginController = launchAtLoginController
+
+        var openCount = 0
+        delegate.showSettingsWindow = { openCount += 1 }
+
+        delegate.applicationDidFinishLaunching(Notification(name: NSApplication.didFinishLaunchingNotification))
+
+        #expect(launchAtLoginController.openSystemSettingsCallCount == 0)
+        #expect(openCount == 0)
     }
 
     @Test func appIsAgentOnlyWithoutDockIcon() {
@@ -195,6 +247,69 @@ struct AppDelegateTests {
         delegate.showSettingsWindow = { openCount += 1 }
 
         delegate.applicationDidBecomeActive(Notification(name: NSApplication.didBecomeActiveNotification))
+        #expect(openCount == 1)
+    }
+
+    @Test func applicationDidBecomeActiveDoesNotRequestSettingsWindowAfterLaunchAtLogin() {
+        let delegate = AppDelegate()
+        let launchAtLoginController = RecordingLaunchAtLoginController()
+        launchAtLoginController.wasLaunchedAtLogin = true
+        let state = AppState(
+            permissionChecker: MockPermissionChecker(),
+            gestureEngine: RecordingGestureRuntime(),
+            scrollSuppressor: RecordingPhysicalClickCoordinator()
+        )
+        state.isSettingsPresented = false
+        delegate.appState = state
+        delegate.launchAtLoginController = launchAtLoginController
+
+        var openCount = 0
+        delegate.showSettingsWindow = { openCount += 1 }
+
+        delegate.applicationDidFinishLaunching(Notification(name: NSApplication.didFinishLaunchingNotification))
+        delegate.applicationDidBecomeActive(Notification(name: NSApplication.didBecomeActiveNotification))
+
+        #expect(openCount == 0)
+    }
+
+    @Test func applicationDidBecomeActiveKeepsDeferredApprovalBackgroundedAfterLoginLaunch() {
+        let delegate = AppDelegate()
+        let launchAtLoginController = RecordingLaunchAtLoginController()
+        launchAtLoginController.wasLaunchedAtLogin = true
+        launchAtLoginController.ensureEnabledResult = .requiresApproval
+        let state = AppState(
+            permissionChecker: MockPermissionChecker(),
+            gestureEngine: RecordingGestureRuntime(),
+            scrollSuppressor: RecordingPhysicalClickCoordinator()
+        )
+        state.isSettingsPresented = false
+        delegate.appState = state
+        delegate.launchAtLoginController = launchAtLoginController
+
+        var openCount = 0
+        delegate.showSettingsWindow = { openCount += 1 }
+
+        delegate.applicationDidFinishLaunching(Notification(name: NSApplication.didFinishLaunchingNotification))
+        delegate.applicationDidBecomeActive(Notification(name: NSApplication.didBecomeActiveNotification))
+
+        #expect(launchAtLoginController.openSystemSettingsCallCount == 0)
+        #expect(openCount == 0)
+    }
+
+    @Test func applicationShouldHandleReopenConsumesDeferredApprovalAfterLoginLaunch() {
+        let delegate = AppDelegate()
+        let launchAtLoginController = RecordingLaunchAtLoginController()
+        launchAtLoginController.wasLaunchedAtLogin = true
+        launchAtLoginController.ensureEnabledResult = .requiresApproval
+        delegate.launchAtLoginController = launchAtLoginController
+
+        var openCount = 0
+        delegate.showSettingsWindow = { openCount += 1 }
+
+        delegate.applicationDidFinishLaunching(Notification(name: NSApplication.didFinishLaunchingNotification))
+        #expect(delegate.applicationShouldHandleReopen(NSApplication.shared, hasVisibleWindows: false) == true)
+
+        #expect(launchAtLoginController.openSystemSettingsCallCount == 1)
         #expect(openCount == 1)
     }
 
@@ -274,6 +389,73 @@ struct AppDelegateTests {
 
         #expect(restoreCount == 1)
         #expect(suppressor.appInteractionStates == [true, false])
+    }
+}
+
+@MainActor
+struct LaunchAtLoginManagerTests {
+    @Test func ensureEnabledSkipsRegistrationWhenAlreadyEnabled() {
+        let service = StubLoginItemService(status: .enabled)
+        let manager = LaunchAtLoginManager(
+            service: service,
+            appleEventProvider: { nil },
+            systemSettingsOpener: {}
+        )
+
+        #expect(manager.ensureEnabled() == .enabled)
+        #expect(service.registerCallCount == 0)
+    }
+
+    @Test func ensureEnabledRegistersMainAppWhenNotRegistered() {
+        let service = StubLoginItemService(status: .notRegistered)
+        service.registerHandler = {
+            service.status = .enabled
+        }
+        let manager = LaunchAtLoginManager(
+            service: service,
+            appleEventProvider: { nil },
+            systemSettingsOpener: {}
+        )
+
+        #expect(manager.ensureEnabled() == .enabled)
+        #expect(service.registerCallCount == 1)
+    }
+
+    @Test func ensureEnabledReturnsRequiresApprovalWhenRegistrationNeedsApproval() {
+        let service = StubLoginItemService(status: .notRegistered)
+        service.registerHandler = {
+            service.status = .requiresApproval
+        }
+        let manager = LaunchAtLoginManager(
+            service: service,
+            appleEventProvider: { nil },
+            systemSettingsOpener: {}
+        )
+
+        #expect(manager.ensureEnabled() == .requiresApproval)
+        #expect(service.registerCallCount == 1)
+    }
+
+    @Test func detectsLaunchAtLoginAppleEvent() {
+        let service = StubLoginItemService(status: .enabled)
+        let appleEvent = NSAppleEventDescriptor(
+            eventClass: AEEventClass(kCoreEventClass),
+            eventID: AEEventID(kAEOpenApplication),
+            targetDescriptor: nil,
+            returnID: AEReturnID(kAutoGenerateReturnID),
+            transactionID: AETransactionID(kAnyTransactionID)
+        )
+        appleEvent.setParam(
+            NSAppleEventDescriptor(enumCode: keyAELaunchedAsLogInItem),
+            forKeyword: AEKeyword(keyAEPropData)
+        )
+        let manager = LaunchAtLoginManager(
+            service: service,
+            appleEventProvider: { appleEvent },
+            systemSettingsOpener: {}
+        )
+
+        #expect(manager.wasLaunchedAtLogin == true)
     }
 }
 
@@ -1519,6 +1701,38 @@ final class RecordingSystemGestureManager: SystemGestureManaging {
 
     func restoreIfNeeded() {
         restoreIfNeededCallCount += 1
+    }
+}
+
+@MainActor
+final class RecordingLaunchAtLoginController: LaunchAtLoginControlling {
+    var wasLaunchedAtLogin = false
+    var ensureEnabledResult: LaunchAtLoginRegistrationResult = .enabled
+    private(set) var ensureEnabledCallCount = 0
+    private(set) var openSystemSettingsCallCount = 0
+
+    func ensureEnabled() -> LaunchAtLoginRegistrationResult {
+        ensureEnabledCallCount += 1
+        return ensureEnabledResult
+    }
+
+    func openSystemSettings() {
+        openSystemSettingsCallCount += 1
+    }
+}
+
+final class StubLoginItemService: LoginItemServiceControlling {
+    var status: SMAppService.Status
+    var registerHandler: (() -> Void)?
+    private(set) var registerCallCount = 0
+
+    init(status: SMAppService.Status) {
+        self.status = status
+    }
+
+    func register() throws {
+        registerCallCount += 1
+        registerHandler?()
     }
 }
 

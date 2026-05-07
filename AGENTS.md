@@ -8,7 +8,7 @@
 macOS menu bar utility (Swift 5.9+, SwiftUI, Xcode). Trackpad swipe/tap/click gestures → keyboard shortcuts.
 Bundle ID: `com.padium`, version 0.1.0. LSUIElement=true (no Dock icon).
 
-**Scope**: owner-local MVP only — do NOT add packaging, export, distribution, or launch-at-login features.
+**Scope**: owner-local MVP only — do NOT add packaging, export, or distribution features. Launch-at-login is intentionally always-on for the installed app (auto-register the main app, no user-facing toggle, keep login launches backgrounded).
 
 ## Dependencies (SPM via Xcode)
 - `KeyboardShortcuts` 2.4.0 — shortcut recording UI + UserDefaults persistence
