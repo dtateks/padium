@@ -2,21 +2,6 @@ import AppKit
 import CoreGraphics
 import Foundation
 
-/// Marks CGEvents that Padium itself posts (e.g. synthetic middle clicks)
-/// so the scroll-suppressor's event tap recognizes them and passes them
-/// through instead of trying to interpret them as user-driven clicks.
-enum PadiumSyntheticEventMarker {
-    static let value: Int64 = 0x50414449554D
-
-    static func mark(_ event: CGEvent) {
-        event.setIntegerValueField(.eventSourceUserData, value: value)
-    }
-
-    static func matches(_ event: CGEvent) -> Bool {
-        event.getIntegerValueField(.eventSourceUserData) == value
-    }
-}
-
 protocol PhysicalClickScheduledWork: AnyObject {
     func cancel()
 }
