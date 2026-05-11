@@ -200,201 +200,247 @@ final class GestureEngine {
                 sink.isMultitouchActive = false
             }
 
-            var candidate: GestureCandidate?
-            var waitingForLift = false
-            var suppressNewCandidatesUntilLift = false
-            // Raw-frame identifier first-seen timestamps for the whole sequence
-            // (reset on lift). Drives the multi-finger concurrency gate that
-            // rejects asynchronously-landed palm/corner contacts which pass
-            // geometric filters by coincidence.
-            var identifierFirstSeenAt: [Int: Date] = [:]
-            // Highest RAW frame.count observed in the current sequence. This
-            // is the load-bearing signal against "unsupported higher-count
-            // frame appears AFTER a candidate already formed" — the classic
-            // 4-finger-lands-after-3 path. Tainted even when raw fingers
-            // aren't yet classifiable (starting/making states) so nothing
-            // about stable contacts can hide a real 4-finger event.
-            var rawMaximumFingerCount = 0
+            var state = SequenceState()
 
             for await frame in self.source.touchFrameStream {
-                if Task.isCancelled {
-                    break
-                }
-
-                sink.currentFingerCount = frame.count
-
-                if frame.isEmpty {
-                    if let candidate {
-                        PadiumLogger.gesture.debug("TAP-DIAG: lift with candidate fc=\(candidate.peakFingerCount) travel=\(candidate.maximumTravel) dur=\(candidate.duration(at: self.scheduler.now)) rawPeak=\(rawMaximumFingerCount)")
-                        self.handleLift(
-                            of: candidate,
-                            classifier: localClassifier,
-                            identifierFirstSeenAt: identifierFirstSeenAt,
-                            using: localContinuation
-                        )
-                    }
-                    candidate = nil
-                    waitingForLift = false
-                    suppressNewCandidatesUntilLift = false
-                    identifierFirstSeenAt.removeAll(keepingCapacity: true)
-                    rawMaximumFingerCount = 0
-                    sink.isMultitouchActive = false
-                    continue
-                }
-
-                // Record first-seen timestamps for every raw identifier in
-                // this frame BEFORE any filtering, so the concurrency gate
-                // sees the true landing spread even when early frames are
-                // rejected by `stableActiveContacts`.
-                let nowForFrame = self.scheduler.now
-                for point in frame where identifierFirstSeenAt[point.identifier] == nil {
-                    identifierFirstSeenAt[point.identifier] = nowForFrame
-                }
-
-                // Track raw peak count independent of classifier filters.
-                rawMaximumFingerCount = max(rawMaximumFingerCount, frame.count)
-
-                if waitingForLift {
-                    if frame.count >= 2 {
-                        PadiumLogger.gesture.debug("TAP-DIAG: post-commit frame ignored fc=\(frame.count) raw=\(Self.describeFrame(frame), privacy: .public)")
-                    }
-                    continue
-                }
-
-                // Log raw frame telemetry for 2+ touch frames so palm/corner
-                // false-positive investigation has per-touch geometry, state,
-                // total capacitance, and major-axis without attaching a debugger.
-                if frame.count >= 2 {
-                    PadiumLogger.gesture.debug("TAP-DIAG: frame fc=\(frame.count) rawPeak=\(rawMaximumFingerCount) raw=\(Self.describeFrame(frame), privacy: .public)")
-                }
-
-                let maxConfiguredFingerCount = self.maximumConfiguredFingerCount(
-                    defaultingTo: max(frame.count, rawMaximumFingerCount)
+                if Task.isCancelled { break }
+                self.processFrame(
+                    frame,
+                    state: &state,
+                    classifier: localClassifier,
+                    sink: sink,
+                    continuation: localContinuation
                 )
-
-                // LOAD-BEARING GATE: if the RAW frame count (or the sequence's
-                // raw peak) ever exceeded the max configured finger count,
-                // this sequence belongs to an unbound higher-finger macOS
-                // gesture. Drop any in-flight candidate and suppress new
-                // candidates until the user lifts. This bursts the classic
-                // "4-finger vuốt landed after 3-finger candidate already
-                // formed" false-positive path, regardless of whether the
-                // extra finger appears in the very first frame, mid-sequence,
-                // or during the lift transition.
-                if rawMaximumFingerCount > maxConfiguredFingerCount {
-                    if candidate != nil || !suppressNewCandidatesUntilLift {
-                        PadiumLogger.gesture.debug("TAP-DIAG: rawPeak SUPPRESS rawPeak=\(rawMaximumFingerCount) maxConfigured=\(maxConfiguredFingerCount) hadCandidate=\(candidate != nil)")
-                    }
-                    candidate = nil
-                    suppressNewCandidatesUntilLift = true
-                    sink.isMultitouchActive = frame.count >= 3
-                    continue
-                }
-
-                guard let contacts = localClassifier.stableActiveContacts(in: frame, expectedFingerCount: frame.count) else {
-                    // Touches are present but not in a classifiable state (e.g., starting
-                    // or leaving transitions). Keep the candidate alive so tap recognition
-                    // can complete on the subsequent empty frame.
-                    if frame.count >= 2 {
-                        let reason = Self.describeStableContactsRejection(frame: frame)
-                        PadiumLogger.gesture.debug("TAP-DIAG: no stable contacts fc=\(frame.count) reason=\(reason, privacy: .public) candidate=\(candidate != nil)")
-                    }
-                    continue
-                }
-
-                let fingerCount = contacts.count
-
-                if suppressNewCandidatesUntilLift {
-                    sink.isMultitouchActive = fingerCount >= 3
-                    continue
-                }
-
-                guard self.hasActiveSlots(for: fingerCount) else {
-                    // No slots configured for the active count. Preserve any
-                    // in-progress candidate so transient 5+ finger noise or a
-                    // lift transition through an unsupported count does not
-                    // tear it down. Travel is updated for fingers we can match.
-                    if var preserved = candidate {
-                        preserved.recordTravel(using: contacts)
-                        candidate = preserved
-                        sink.isMultitouchActive = preserved.peakFingerCount >= 3
-                    } else {
-                        sink.isMultitouchActive = false
-                    }
-                    PadiumLogger.gesture.debug("TAP-DIAG: no active slots for fc=\(fingerCount), candidate=\(candidate != nil)")
-                    continue
-                }
-
-                // Reflect the gesture's intent (peak count) when reporting
-                // multitouch activity so scroll suppression keeps holding
-                // through brief lift transitions of 3/4-finger gestures.
-                sink.isMultitouchActive = max(fingerCount, candidate?.peakFingerCount ?? 0) >= 3
-
-                guard let activeCandidate = candidate else {
-                    PadiumLogger.gesture.debug("TAP-DIAG: candidate SEED fc=\(fingerCount)")
-                    candidate = self.makeCandidate(contacts: contacts, peakFingerCount: fingerCount)
-                    continue
-                }
-
-                if fingerCount > activeCandidate.peakFingerCount {
-                    // UPGRADE: more fingers than ever seen. Re-anchor at the
-                    // new peak so swipe displacement is measured from when
-                    // the user's intended finger count was actually present.
-                    PadiumLogger.gesture.debug("TAP-DIAG: candidate UPGRADE peak=\(activeCandidate.peakFingerCount) -> \(fingerCount)")
-                    candidate = self.makeCandidate(contacts: contacts, peakFingerCount: fingerCount)
-                    continue
-                }
-
-                if fingerCount < activeCandidate.peakFingerCount {
-                    // Lift in progress: do NOT downgrade. Treating an
-                    // intermediate lower-finger frame as a separate gesture
-                    // is what causes a 4-finger swipe to be misclassified
-                    // as a 2/3-finger tap on lift.
-                    var preserved = activeCandidate
-                    preserved.recordTravel(using: contacts)
-                    candidate = preserved
-                    PadiumLogger.gesture.debug("TAP-DIAG: candidate HOLD peak=\(preserved.peakFingerCount) active=\(fingerCount) travel=\(preserved.maximumTravel)")
-                    continue
-                }
-
-                // fingerCount == peakFingerCount.
-                guard activeCandidate.trackedIdentifiers == Set(contacts.keys) else {
-                    // ID churn at the peak — re-anchor with the new identifiers.
-                    PadiumLogger.gesture.debug("TAP-DIAG: candidate RE-ANCHOR (id churn) peak=\(fingerCount) oldIDs=\(activeCandidate.trackedIdentifiers.sorted(), privacy: .public) newIDs=\(contacts.keys.sorted(), privacy: .public)")
-                    candidate = self.makeCandidate(contacts: contacts, peakFingerCount: fingerCount)
-                    continue
-                }
-
-                var updatedCandidate = activeCandidate
-                updatedCandidate.latestStableContacts = contacts
-                updatedCandidate.recordTravel(using: contacts)
-
-                // Defer swipe classification while a higher finger count is
-                // still possible AND the peak hasn't held long enough for
-                // the trailing landing finger to arrive. Once the gate is
-                // open (or no upgrade is possible), commit on motion alone.
-                let settleSatisfied = self.swipeSettleSatisfied(
-                    for: updatedCandidate,
-                    now: self.scheduler.now
-                )
-                if settleSatisfied,
-                   let event = localClassifier.classifyIncremental(
-                       firstContacts: updatedCandidate.originContacts,
-                       currentContacts: contacts,
-                       peakFingerCount: updatedCandidate.peakFingerCount
-                   ),
-                   self.activeSlots.contains(event.slot) {
-                    PadiumLogger.gesture.debug("TAP-DIAG: EMIT swipe slot=\(event.slot.rawValue, privacy: .public) fc=\(updatedCandidate.peakFingerCount) travel=\(updatedCandidate.maximumTravel) dur=\(updatedCandidate.duration(at: self.scheduler.now))")
-                    localContinuation.yield(event)
-                    waitingForLift = true
-                    candidate = nil
-                    continue
-                }
-
-                candidate = updatedCandidate
             }
         }
         return true
+    }
+
+    // Per-sequence mutable state captured between frames. Local to a single
+    // `start()` call so a restart begins with empty state — never hoisted to
+    // an instance property, which would create cross-start aliasing.
+    private struct SequenceState {
+        var candidate: GestureCandidate?
+        var waitingForLift = false
+        var suppressNewCandidatesUntilLift = false
+        // Raw-frame identifier first-seen timestamps for the whole sequence
+        // (reset on lift). Drives the multi-finger concurrency gate that
+        // rejects asynchronously-landed palm/corner contacts which pass
+        // geometric filters by coincidence.
+        var identifierFirstSeenAt: [Int: Date] = [:]
+        // Highest RAW frame.count observed in the current sequence. Load-bearing
+        // signal against "unsupported higher-count frame appears AFTER a
+        // candidate already formed" — the classic 4-finger-lands-after-3 path.
+        // Tainted even when raw fingers aren't yet classifiable (starting/
+        // making states) so nothing about stable contacts can hide a real
+        // 4-finger event.
+        var rawMaximumFingerCount = 0
+    }
+
+    private func processFrame(
+        _ frame: [TouchPoint],
+        state: inout SequenceState,
+        classifier: GestureClassifier,
+        sink: any MultitouchStateSink,
+        continuation: AsyncStream<GestureEvent>.Continuation
+    ) {
+        sink.currentFingerCount = frame.count
+
+        if frame.isEmpty {
+            handleLiftFrame(state: &state, classifier: classifier, sink: sink, continuation: continuation)
+            return
+        }
+
+        recordFrameLanding(frame: frame, state: &state)
+
+        if state.waitingForLift {
+            if frame.count >= 2 {
+                PadiumLogger.gesture.debug("TAP-DIAG: post-commit frame ignored fc=\(frame.count) raw=\(Self.describeFrame(frame), privacy: .public)")
+            }
+            return
+        }
+
+        let rawPeakSnapshot = state.rawMaximumFingerCount
+        if frame.count >= 2 {
+            // Per-touch geometry, state, total capacitance, and major-axis for
+            // every 2+ touch frame so palm/corner false-positive investigation
+            // has the raw signals available without attaching a debugger.
+            PadiumLogger.gesture.debug("TAP-DIAG: frame fc=\(frame.count) rawPeak=\(rawPeakSnapshot) raw=\(Self.describeFrame(frame), privacy: .public)")
+        }
+
+        let maxConfiguredFingerCount = maximumConfiguredFingerCount(
+            defaultingTo: max(frame.count, rawPeakSnapshot)
+        )
+
+        // LOAD-BEARING GATE: if the RAW frame count (or the sequence's raw
+        // peak) ever exceeded the max configured finger count, this sequence
+        // belongs to an unbound higher-finger macOS gesture. Drop any in-flight
+        // candidate and suppress new candidates until the user lifts. Bursts
+        // the classic "4-finger landed after 3-finger candidate already formed"
+        // false-positive path regardless of whether the extra finger appears
+        // in the very first frame, mid-sequence, or during the lift transition.
+        if rawPeakSnapshot > maxConfiguredFingerCount {
+            let hadCandidate = state.candidate != nil
+            if hadCandidate || !state.suppressNewCandidatesUntilLift {
+                PadiumLogger.gesture.debug("TAP-DIAG: rawPeak SUPPRESS rawPeak=\(rawPeakSnapshot) maxConfigured=\(maxConfiguredFingerCount) hadCandidate=\(hadCandidate)")
+            }
+            state.candidate = nil
+            state.suppressNewCandidatesUntilLift = true
+            sink.isMultitouchActive = frame.count >= 3
+            return
+        }
+
+        guard let contacts = classifier.stableActiveContacts(in: frame, expectedFingerCount: frame.count) else {
+            // Touches are present but not in a classifiable state (e.g., starting
+            // or leaving transitions). Keep the candidate alive so tap recognition
+            // can complete on the subsequent empty frame.
+            if frame.count >= 2 {
+                let reason = Self.describeStableContactsRejection(frame: frame)
+                let hadCandidate = state.candidate != nil
+                PadiumLogger.gesture.debug("TAP-DIAG: no stable contacts fc=\(frame.count) reason=\(reason, privacy: .public) candidate=\(hadCandidate)")
+            }
+            return
+        }
+
+        let fingerCount = contacts.count
+
+        if state.suppressNewCandidatesUntilLift {
+            sink.isMultitouchActive = fingerCount >= 3
+            return
+        }
+
+        guard hasActiveSlots(for: fingerCount) else {
+            // No slots configured for the active count. Preserve any in-progress
+            // candidate so transient 5+ finger noise or a lift transition
+            // through an unsupported count does not tear it down. Travel is
+            // updated for fingers we can match.
+            if var preserved = state.candidate {
+                preserved.recordTravel(using: contacts)
+                state.candidate = preserved
+                sink.isMultitouchActive = preserved.peakFingerCount >= 3
+            } else {
+                sink.isMultitouchActive = false
+            }
+            let hadCandidate = state.candidate != nil
+            PadiumLogger.gesture.debug("TAP-DIAG: no active slots for fc=\(fingerCount), candidate=\(hadCandidate)")
+            return
+        }
+
+        // Reflect the gesture's intent (peak count) when reporting multitouch
+        // activity so scroll suppression keeps holding through brief lift
+        // transitions of 3/4-finger gestures.
+        sink.isMultitouchActive = max(fingerCount, state.candidate?.peakFingerCount ?? 0) >= 3
+
+        advanceCandidate(
+            contacts: contacts,
+            fingerCount: fingerCount,
+            state: &state,
+            classifier: classifier,
+            continuation: continuation
+        )
+    }
+
+    private func handleLiftFrame(
+        state: inout SequenceState,
+        classifier: GestureClassifier,
+        sink: any MultitouchStateSink,
+        continuation: AsyncStream<GestureEvent>.Continuation
+    ) {
+        if let candidate = state.candidate {
+            let rawPeakAtLift = state.rawMaximumFingerCount
+            PadiumLogger.gesture.debug("TAP-DIAG: lift with candidate fc=\(candidate.peakFingerCount) travel=\(candidate.maximumTravel) dur=\(candidate.duration(at: self.scheduler.now)) rawPeak=\(rawPeakAtLift)")
+            handleLift(
+                of: candidate,
+                classifier: classifier,
+                identifierFirstSeenAt: state.identifierFirstSeenAt,
+                using: continuation
+            )
+        }
+        state.candidate = nil
+        state.waitingForLift = false
+        state.suppressNewCandidatesUntilLift = false
+        state.identifierFirstSeenAt.removeAll(keepingCapacity: true)
+        state.rawMaximumFingerCount = 0
+        sink.isMultitouchActive = false
+    }
+
+    private func recordFrameLanding(frame: [TouchPoint], state: inout SequenceState) {
+        // Record first-seen timestamps for every raw identifier in this frame
+        // BEFORE any filtering, so the concurrency gate sees the true landing
+        // spread even when early frames are rejected by `stableActiveContacts`.
+        let now = scheduler.now
+        for point in frame where state.identifierFirstSeenAt[point.identifier] == nil {
+            state.identifierFirstSeenAt[point.identifier] = now
+        }
+        // Track raw peak count independent of classifier filters.
+        state.rawMaximumFingerCount = max(state.rawMaximumFingerCount, frame.count)
+    }
+
+    private func advanceCandidate(
+        contacts: [Int: TouchPoint],
+        fingerCount: Int,
+        state: inout SequenceState,
+        classifier: GestureClassifier,
+        continuation: AsyncStream<GestureEvent>.Continuation
+    ) {
+        guard let activeCandidate = state.candidate else {
+            PadiumLogger.gesture.debug("TAP-DIAG: candidate SEED fc=\(fingerCount)")
+            state.candidate = makeCandidate(contacts: contacts, peakFingerCount: fingerCount)
+            return
+        }
+
+        if fingerCount > activeCandidate.peakFingerCount {
+            // UPGRADE: more fingers than ever seen. Re-anchor at the new peak
+            // so swipe displacement is measured from when the user's intended
+            // finger count was actually present.
+            PadiumLogger.gesture.debug("TAP-DIAG: candidate UPGRADE peak=\(activeCandidate.peakFingerCount) -> \(fingerCount)")
+            state.candidate = makeCandidate(contacts: contacts, peakFingerCount: fingerCount)
+            return
+        }
+
+        if fingerCount < activeCandidate.peakFingerCount {
+            // Lift in progress: do NOT downgrade. Treating an intermediate
+            // lower-finger frame as a separate gesture is what causes a
+            // 4-finger swipe to be misclassified as a 2/3-finger tap on lift.
+            var preserved = activeCandidate
+            preserved.recordTravel(using: contacts)
+            state.candidate = preserved
+            PadiumLogger.gesture.debug("TAP-DIAG: candidate HOLD peak=\(preserved.peakFingerCount) active=\(fingerCount) travel=\(preserved.maximumTravel)")
+            return
+        }
+
+        // fingerCount == peakFingerCount.
+        guard activeCandidate.trackedIdentifiers == Set(contacts.keys) else {
+            // ID churn at the peak — re-anchor with the new identifiers.
+            PadiumLogger.gesture.debug("TAP-DIAG: candidate RE-ANCHOR (id churn) peak=\(fingerCount) oldIDs=\(activeCandidate.trackedIdentifiers.sorted(), privacy: .public) newIDs=\(contacts.keys.sorted(), privacy: .public)")
+            state.candidate = makeCandidate(contacts: contacts, peakFingerCount: fingerCount)
+            return
+        }
+
+        var updatedCandidate = activeCandidate
+        updatedCandidate.latestStableContacts = contacts
+        updatedCandidate.recordTravel(using: contacts)
+
+        // Defer swipe classification while a higher finger count is still
+        // possible AND the peak hasn't held long enough for the trailing
+        // landing finger to arrive. Once the gate is open (or no upgrade is
+        // possible), commit on motion alone.
+        let settleSatisfied = swipeSettleSatisfied(for: updatedCandidate, now: scheduler.now)
+        if settleSatisfied,
+           let event = classifier.classifyIncremental(
+               firstContacts: updatedCandidate.originContacts,
+               currentContacts: contacts,
+               peakFingerCount: updatedCandidate.peakFingerCount
+           ),
+           activeSlots.contains(event.slot) {
+            PadiumLogger.gesture.debug("TAP-DIAG: EMIT swipe slot=\(event.slot.rawValue, privacy: .public) fc=\(updatedCandidate.peakFingerCount) travel=\(updatedCandidate.maximumTravel) dur=\(updatedCandidate.duration(at: self.scheduler.now))")
+            continuation.yield(event)
+            state.waitingForLift = true
+            state.candidate = nil
+            return
+        }
+
+        state.candidate = updatedCandidate
     }
 
     func stop() {
