@@ -1,6 +1,6 @@
 <!-- Scoped to Padium/ source directory. Root AGENTS.md covers architecture, contracts, and conventions. -->
 
-**Updated:** 2026-04-27 08:10
+**Updated:** 2026-05-12 00:08
 **Commit:** working tree
 **Branch:** main
 

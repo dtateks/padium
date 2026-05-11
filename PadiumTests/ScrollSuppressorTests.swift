@@ -69,9 +69,10 @@ struct ScrollSuppressorTests {
     }
 
     @Test func physicalThreeFingerClickEmitsConfiguredSlotAndSuppressesPair() {
-        let suppressor = ScrollSuppressor()
-        suppressor.currentFingerCount = 3
-        suppressor.isMultitouchActive = true
+        let state = MultitouchState()
+        state.currentFingerCount = 3
+        state.isMultitouchActive = true
+        let suppressor = ScrollSuppressor(multitouchState: state)
         let recorder = SlotRecorder()
         suppressor.setPhysicalClickHandler { event in
             recorder.slots.append(event.slot)
@@ -103,9 +104,10 @@ struct ScrollSuppressorTests {
 
     @Test func physicalThreeFingerClickWaitsForDoubleClickWindowBeforeSingleClick() {
         let scheduler = ManualPhysicalClickScheduler()
-        let suppressor = ScrollSuppressor(clickScheduler: scheduler)
-        suppressor.currentFingerCount = 3
-        suppressor.isMultitouchActive = true
+        let state = MultitouchState()
+        state.currentFingerCount = 3
+        state.isMultitouchActive = true
+        let suppressor = ScrollSuppressor(multitouchState: state, clickScheduler: scheduler)
         let recorder = SlotRecorder()
         suppressor.setPhysicalClickHandler { event in
             recorder.slots.append(event.slot)
@@ -140,9 +142,10 @@ struct ScrollSuppressorTests {
 
     @Test func physicalFourFingerDoubleClickEmitsConfiguredDoubleClickSlot() {
         let scheduler = ManualPhysicalClickScheduler()
-        let suppressor = ScrollSuppressor(clickScheduler: scheduler)
-        suppressor.currentFingerCount = 4
-        suppressor.isMultitouchActive = true
+        let state = MultitouchState()
+        state.currentFingerCount = 4
+        state.isMultitouchActive = true
+        let suppressor = ScrollSuppressor(multitouchState: state, clickScheduler: scheduler)
         let recorder = SlotRecorder()
         suppressor.setPhysicalClickHandler { event in
             recorder.slots.append(event.slot)
@@ -203,10 +206,11 @@ struct ScrollSuppressorTests {
         ]
 
         for testCase in cases {
-            let suppressor = ScrollSuppressor()
+            let state = MultitouchState()
+            state.currentFingerCount = testCase.fingerCount
+            state.isMultitouchActive = false
+            let suppressor = ScrollSuppressor(multitouchState: state)
             let recorder = SlotRecorder()
-            suppressor.currentFingerCount = testCase.fingerCount
-            suppressor.isMultitouchActive = false
             suppressor.setPhysicalClickHandler { event in
                 recorder.slots.append(event.slot)
             }
@@ -239,9 +243,10 @@ struct ScrollSuppressorTests {
     }
 
     @Test func configuredPhysicalClickPassesThroughWhileAppInteractionIsActive() {
-        let suppressor = ScrollSuppressor()
-        suppressor.currentFingerCount = 3
-        suppressor.isMultitouchActive = true
+        let state = MultitouchState()
+        state.currentFingerCount = 3
+        state.isMultitouchActive = true
+        let suppressor = ScrollSuppressor(multitouchState: state)
         suppressor.setAppInteractionActive(true)
         let recorder = SlotRecorder()
         suppressor.setPhysicalClickHandler { event in
@@ -275,9 +280,10 @@ struct ScrollSuppressorTests {
     }
 
     @Test func configuredPhysicalClickPassesThroughInSystemMenuBar() {
-        let suppressor = ScrollSuppressor()
-        suppressor.currentFingerCount = 3
-        suppressor.isMultitouchActive = true
+        let state = MultitouchState()
+        state.currentFingerCount = 3
+        state.isMultitouchActive = true
+        let suppressor = ScrollSuppressor(multitouchState: state)
         let recorder = SlotRecorder()
         suppressor.setPhysicalClickHandler { event in
             recorder.slots.append(event.slot)
@@ -299,9 +305,10 @@ struct ScrollSuppressorTests {
     }
 
     @Test func unconfiguredPhysicalClickPassesThroughWithoutTouchTapDedupWindow() {
-        let suppressor = ScrollSuppressor()
-        suppressor.currentFingerCount = 3
-        suppressor.isMultitouchActive = true
+        let state = MultitouchState()
+        state.currentFingerCount = 3
+        state.isMultitouchActive = true
+        let suppressor = ScrollSuppressor(multitouchState: state)
 
         switch suppressor.eventDisposition(
             for: .leftMouseDown,

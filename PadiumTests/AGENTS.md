@@ -1,6 +1,6 @@
 <!-- Scoped to PadiumTests/ directory. Root AGENTS.md covers test framework choice and determinism rule. -->
 
-**Updated:** 2026-05-11 23:30
+**Updated:** 2026-05-12 00:08
 **Commit:** working tree
 **Branch:** main
 
@@ -9,7 +9,7 @@
 - `@MainActor struct XxxTests` — all test structs are MainActor-isolated
 - Use `@Suite(.serialized)` when a test suite mutates shared user-default-backed configuration or singleton runtime state
 - `GestureEngineTests` and `AppStateTests` stay serialized because they mutate process-wide `UserDefaults` and `KeyboardShortcuts` storage that `AppState`'s observers react to; the ScrollSuppressor singleton is gone (each test injects its own coordinator/sink), but the shared-defaults state remains
-- Cross-suite shared mocks live in `TestSupport.swift`: `MockPermissionChecker`, `StubPreemptionController`, `RecordingSystemGestureManager`, `RecordingLaunchAtLoginController`, `StubLoginItemService`, `RecordingGestureRuntime`, `RecordingPhysicalClickCoordinator` (conforms to `PhysicalClickCoordinating`, which now inherits `MultitouchStateSink`), `RecordingMultitouchStateSink` (sink-only stub for `GestureEngine` tests), `RecordingShortcutEmitter`, `RecordingUserDefaultsShortcutEmitter`, `RecordingMiddleClickEmitter`, plus `GestureConfigurationPreserver` and CGEvent helpers (`makeLeftClickEvent`, `makeMenuBarClickLocation`). File-private helpers stay co-located with the test file that uses them
+- Cross-suite shared mocks live in `TestSupport.swift`: `MockPermissionChecker`, `StubPreemptionController`, `RecordingSystemGestureManager`, `RecordingLaunchAtLoginController`, `StubLoginItemService`, `RecordingGestureRuntime`, `RecordingPhysicalClickCoordinator` (conforms to the now-narrowed `PhysicalClickCoordinating` — no multitouch sink role), `RecordingMultitouchStateSink` (sink-only stub for `GestureEngine` tests; `ScrollSuppressorTests` uses a real `MultitouchState` to seed finger count + activity), `RecordingShortcutEmitter`, `RecordingUserDefaultsShortcutEmitter`, `RecordingMiddleClickEmitter`, plus `GestureConfigurationPreserver` and CGEvent helpers (`makeLeftClickEvent`, `makeMenuBarClickLocation`). File-private helpers stay co-located with the test file that uses them
 - Stubs expose call counts (`startCallCount`, `stopCallCount`) and controllable async streams
 - Frame helpers like `makeSwipeFrames(fingerCount:startX:startY:endX:endY:)` and tap/double-tap builders build `[[TouchPoint]]` for classifier/engine tests
 - Async pipeline tests: yield frames into stub source → `Task.yield()` to flush → assert on collected events
@@ -30,7 +30,8 @@
 | AppStateTests.swift | AppState | Runtime auto-start under granted/denied permissions, degraded modes, KeyboardShortcuts-driven config propagation, system gesture suppression, sensitivity changes, middle-click action kind, runtime separation under partial failures |
 | AppDelegateTests.swift | AppDelegate | Settings window orchestration, frontmost-app restore, launch-at-login approval handling, app-interaction key/resign tracking |
 | LaunchAtLoginManagerTests.swift | LaunchAtLoginManager | SMAppService registration paths, requires-approval handling, launched-at-login Apple event detection |
-| ScrollSuppressorTests.swift | ScrollSuppressor | Physical 3/4-finger click dispatch, double-click window scheduling, pass-through guards (no multitouch, app interaction, menu bar, unconfigured slot) |
+| ScrollSuppressorTests.swift | ScrollSuppressor | Physical 3/4-finger click dispatch, double-click window scheduling, pass-through guards (no multitouch, app interaction, menu bar, unconfigured slot). Tests seed multitouch state on an injected `MultitouchState` |
+| MultitouchStateTests.swift | MultitouchState | Sticky momentum-suppression bit lifecycle (armed on inactive→active, cleared on scroll-began / mayBegin / momentum-ended), pass-through without prior multitouch, reset semantics, finger-count clamp, snapshot atomicity |
 | ShortcutHotKeyGuardTests.swift | ShortcutHotKeyGuard | Recorder writes + pre-existing stored shortcuts never remain active Carbon hotkeys after guard install |
 | ShortcutEmitterTests.swift | ShortcutEmitter | Lookup + send delegation, explicit modifier/key sequencing, unbound slot returns false |
 | ShortcutRegistryTests.swift | ShortcutRegistry / SystemGestureManager | Name format `"gesture.\(rawValue)"` consistency; vertical Dock-key suppression only when all enabled vertical gestures are suppressed |

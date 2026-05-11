@@ -120,21 +120,22 @@ final class AppState {
         self.defaultsObserver = nil
         self.shortcutObserver = nil
 
-        let resolvedScrollSuppressor = scrollSuppressor ?? ScrollSuppressor()
+        // Single multitouch state object is the shared seam between the
+        // gesture pipeline (writes per-frame finger count + activity) and the
+        // scroll suppressor's CGEventTap (reads to gate scroll + physical
+        // clicks). Threading the same instance into both makes the dependency
+        // explicit instead of relying on a protocol-composition identity trick.
+        let multitouchState = MultitouchState()
+        let resolvedScrollSuppressor = scrollSuppressor ?? ScrollSuppressor(multitouchState: multitouchState)
         self.scrollSuppressor = resolvedScrollSuppressor
 
         if let gestureEngine {
             self.gestureEngine = gestureEngine
         } else {
-            // Same instance flows in two roles: the touch pipeline writes
-            // `currentFingerCount`/`isMultitouchActive` through the inherited
-            // `MultitouchStateSink` surface, and the CGEventTap reads them to
-            // gate physical clicks. The protocol composition makes that
-            // identity explicit at the type level instead of a runtime cast.
             self.gestureEngine = GestureEngine(
                 source: MultitouchGestureSource(),
                 supportedSlots: Set(supportedGestureSlots),
-                multitouchSink: resolvedScrollSuppressor
+                multitouchSink: multitouchState
             )
         }
 

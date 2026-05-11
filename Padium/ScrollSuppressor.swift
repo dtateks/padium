@@ -50,16 +50,18 @@ final class DispatchPhysicalClickWork: PhysicalClickScheduledWork {
 
 /// Write-only surface of multitouch state used by the gesture pipeline to keep
 /// scroll suppression and the trackpad-active flag in sync with the touch stream.
+/// `MultitouchState` is the production implementation; tests use lightweight
+/// stubs.
 protocol MultitouchStateSink: AnyObject, Sendable {
     var currentFingerCount: Int { get set }
     var isMultitouchActive: Bool { get set }
 }
 
 /// Orchestration-facing surface of the scroll suppressor: lifecycle, physical-click
-/// routing, and the post-click touch-tap guard. Inherits `MultitouchStateSink` so
-/// the same instance AppState injects also absorbs the touch pipeline's per-frame
-/// state writes — no shared singleton fallback, no upcast at the wiring seam.
-protocol PhysicalClickCoordinating: MultitouchStateSink {
+/// routing, and the post-click touch-tap guard. Multitouch state lives in a
+/// dedicated `MultitouchState` instance shared between the suppressor and the
+/// gesture pipeline; this protocol no longer mixes the sink role in.
+protocol PhysicalClickCoordinating: AnyObject, Sendable {
     typealias ClickHandler = @Sendable (GestureEvent) -> Void
     func setPhysicalClickHandler(_ handler: ClickHandler?)
     func setAppInteractionActive(_ isActive: Bool)
@@ -68,18 +70,20 @@ protocol PhysicalClickCoordinating: MultitouchStateSink {
     func shouldAllowTouchTap(fingerCount: Int, at timestamp: Date) -> Bool
 }
 
-/// Suppresses macOS scroll wheel events while 3+ finger multitouch is active.
+/// Owns the CGEventTap that suppresses macOS scroll wheel events during
+/// multitouch and intercepts 3/4-finger physical left-clicks.
 ///
 /// Uses a CGEventTap at `.cghidEventTap` to intercept `scrollWheel`,
-/// `leftMouseDown`, and `leftMouseUp` events. When `isMultitouchActive` is true,
-/// scroll events (including subsequent momentum events) are consumed so they don't
-/// reach the active window. Physical left clicks with 3/4 fingers are only
-/// routed through AppState when stable multitouch is active, so raw landing/lift
-/// frames do not swallow ordinary UI clicks.
+/// `leftMouseDown`, and `leftMouseUp` events. Scroll-suppression decisions
+/// (including post-multitouch momentum draining) are delegated to the shared
+/// `MultitouchState`; the physical-click state machine lives here.
 ///
-/// Thread-safety: `isMultitouchActive` is set from the OMS touch callback thread
-/// and read from the CGEventTap callback thread. Uses `os_unfair_lock` for safety.
-final class ScrollSuppressor: @unchecked Sendable, PhysicalClickCoordinating, MultitouchStateSink {
+/// Thread-safety: click-pipeline state (`_leftMouseState`,
+/// `_lastPhysicalClickAtByFingerCount`, etc.) is guarded by `_lock`. The
+/// suppressor never holds `_lock` while calling back into `multitouchState`
+/// in a way that could create a reverse-order dependency — lock order is
+/// `_lock` → multitouchState's internal lock, never the reverse.
+final class ScrollSuppressor: @unchecked Sendable, PhysicalClickCoordinating {
 
     typealias PhysicalClickHandler = @Sendable (GestureEvent) -> Void
 
@@ -98,37 +102,12 @@ final class ScrollSuppressor: @unchecked Sendable, PhysicalClickCoordinating, Mu
         case suppressingHandledPair
     }
 
-    // Raw values of CGEvent's kCGScrollWheelEventScrollPhase field. CoreGraphics
-    // exposes these as opaque Int64 with no Swift enum; named cases make the
-    // suppression logic self-documenting. `noPhase` instead of `none` because
-    // the field gets matched as an Optional (from a failable rawValue init) and
-    // `.none` would shadow `Optional.none` inside the switch.
-    private enum ScrollPhase: Int64 {
-        case noPhase = 0
-        case began = 1
-        case changed = 2
-        case ended = 4
-        case cancelled = 8
-        case mayBegin = 128
-    }
-
-    // Raw values of CGEvent's kCGScrollWheelEventMomentumPhase field.
-    private enum MomentumPhase: Int64 {
-        case noPhase = 0
-        case began = 1
-        case changed = 2
-        case ended = 3
-    }
-
     private static let physicalClickDedupWindow: TimeInterval = 0.5
     private static let physicalDoubleClickWindow: TimeInterval = NSEvent.doubleClickInterval
 
-    // MARK: - Thread-safe multitouch flag
+    // MARK: - Click-pipeline state (protected by _lock)
 
     private var _lock = os_unfair_lock()
-    private var _multitouchActive = false
-    private var _currentFingerCount = 0
-    private var _suppressMomentum = false
     private var _leftMouseState: LeftMouseState = .idle
     private var _lastPhysicalClickAtByFingerCount: [Int: TimeInterval] = [:]
     private var _pendingPhysicalClicksByFingerCount: [Int: PendingPhysicalClick] = [:]
@@ -136,48 +115,15 @@ final class ScrollSuppressor: @unchecked Sendable, PhysicalClickCoordinating, Mu
     private var _appInteractionActive = false
     private var _tapRunLoop: CFRunLoop?
 
+    private let multitouchState: MultitouchState
     private let clickScheduler: any PhysicalClickScheduling
 
-    init(clickScheduler: (any PhysicalClickScheduling)? = nil) {
+    init(
+        multitouchState: MultitouchState = MultitouchState(),
+        clickScheduler: (any PhysicalClickScheduling)? = nil
+    ) {
+        self.multitouchState = multitouchState
         self.clickScheduler = clickScheduler ?? DispatchPhysicalClickScheduler()
-    }
-
-    /// Set to `true` when 3+ fingers are actively touching the trackpad.
-    /// Set to `false` when fingers lift.
-    var isMultitouchActive: Bool {
-        get {
-            os_unfair_lock_lock(&_lock)
-            defer { os_unfair_lock_unlock(&_lock) }
-            return _multitouchActive
-        }
-        set {
-            os_unfair_lock_lock(&_lock)
-            let wasActive = _multitouchActive
-            _multitouchActive = newValue
-            if newValue && !wasActive {
-                // Entering multitouch — any ongoing or future scroll should be suppressed
-                _suppressMomentum = true
-            }
-            if !newValue && wasActive {
-                // Fingers lifted — keep suppressing momentum until momentum ends
-                // _suppressMomentum stays true; cleared when momentum phase ends
-            }
-            os_unfair_lock_unlock(&_lock)
-        }
-    }
-
-    /// Set to the current number of touches observed on the trackpad.
-    var currentFingerCount: Int {
-        get {
-            os_unfair_lock_lock(&_lock)
-            defer { os_unfair_lock_unlock(&_lock) }
-            return _currentFingerCount
-        }
-        set {
-            os_unfair_lock_lock(&_lock)
-            _currentFingerCount = max(newValue, 0)
-            os_unfair_lock_unlock(&_lock)
-        }
     }
 
     // MARK: - Event tap
@@ -262,10 +208,9 @@ final class ScrollSuppressor: @unchecked Sendable, PhysicalClickCoordinating, Mu
         runLoopSource = nil
         tapThread = nil
 
+        multitouchState.reset()
+
         os_unfair_lock_lock(&_lock)
-        _multitouchActive = false
-        _currentFingerCount = 0
-        _suppressMomentum = false
         _leftMouseState = .idle
         _lastPhysicalClickAtByFingerCount = [:]
         for pendingClick in _pendingPhysicalClicksByFingerCount.values {
@@ -332,7 +277,7 @@ final class ScrollSuppressor: @unchecked Sendable, PhysicalClickCoordinating, Mu
     ) -> EventDisposition {
         switch type {
         case .scrollWheel:
-            return shouldSuppress(event) ? .suppress : .passThrough
+            return multitouchState.shouldSuppressScroll(event: event) ? .suppress : .passThrough
         case .leftMouseDown, .leftMouseUp:
             return leftMouseDisposition(
                 for: type,
@@ -344,45 +289,7 @@ final class ScrollSuppressor: @unchecked Sendable, PhysicalClickCoordinating, Mu
         }
     }
 
-    // MARK: - Internal suppression logic
-
-    fileprivate func shouldSuppress(_ event: CGEvent) -> Bool {
-        os_unfair_lock_lock(&_lock)
-        defer { os_unfair_lock_unlock(&_lock) }
-
-        if _multitouchActive {
-            return true
-        }
-
-        // After fingers lift, only suppress leftover momentum from the 3-finger swipe.
-        // Any NEW scroll sequence (began/mayBegin) must pass through immediately.
-        if _suppressMomentum {
-            let momentumPhase = MomentumPhase(rawValue: event.getIntegerValueField(.scrollWheelEventMomentumPhase))
-            if let momentumPhase, momentumPhase != .noPhase {
-                if momentumPhase == .ended {
-                    _suppressMomentum = false
-                }
-                return true
-            }
-
-            let scrollPhase = ScrollPhase(rawValue: event.getIntegerValueField(.scrollWheelEventScrollPhase))
-            switch scrollPhase {
-            case .began, .mayBegin:
-                // New scroll sequence from the user (2-finger) — stop suppressing immediately.
-                _suppressMomentum = false
-                return false
-            case .noPhase, .ended, .cancelled:
-                // End of the old scroll sequence or a discrete (legacy) event — clear and pass.
-                _suppressMomentum = false
-                return false
-            case .changed, nil:
-                // Continuation of the old suppressed sequence, or an unknown raw value — keep suppressing.
-                return true
-            }
-        }
-
-        return false
-    }
+    // MARK: - Internal click resolution
 
     fileprivate func leftMouseDisposition(
         for type: CGEventType,
@@ -424,6 +331,9 @@ final class ScrollSuppressor: @unchecked Sendable, PhysicalClickCoordinating, Mu
         event: CGEvent,
         configuredClickSlotsResolver: (Int) -> (single: GestureSlot?, double: GestureSlot?)
     ) -> EventDisposition {
+        // Snapshot multitouch state before grabbing the click lock so the
+        // store's lock is held for a moment, never nested under `_lock`.
+        let multitouch = multitouchState.snapshot()
         let referenceTime = Date().timeIntervalSinceReferenceDate
         let clickState = max(event.getIntegerValueField(.mouseEventClickState), 1)
         let eventTimestamp = Date(timeIntervalSinceReferenceDate: referenceTime)
@@ -433,7 +343,7 @@ final class ScrollSuppressor: @unchecked Sendable, PhysicalClickCoordinating, Mu
 
         if Self.isSystemMenuBarClick(at: eventLocation) {
             PadiumLogger.gesture.notice(
-                "TAP-DIAG: click pass-through systemMenuBar fc=\(self._currentFingerCount) multitouch=\(self._multitouchActive) appInteraction=\(self._appInteractionActive)"
+                "TAP-DIAG: click pass-through systemMenuBar fc=\(multitouch.currentFingerCount) multitouch=\(multitouch.isMultitouchActive) appInteraction=\(self._appInteractionActive)"
             )
             os_unfair_lock_unlock(&_lock)
             return .passThrough
@@ -441,17 +351,17 @@ final class ScrollSuppressor: @unchecked Sendable, PhysicalClickCoordinating, Mu
 
         if _appInteractionActive {
             PadiumLogger.gesture.notice(
-                "TAP-DIAG: click pass-through appInteraction fc=\(self._currentFingerCount) multitouch=\(self._multitouchActive)"
+                "TAP-DIAG: click pass-through appInteraction fc=\(multitouch.currentFingerCount) multitouch=\(multitouch.isMultitouchActive)"
             )
             os_unfair_lock_unlock(&_lock)
             return .passThrough
         }
 
-        let fingerCount = _currentFingerCount
-        guard _multitouchActive, (3...4).contains(fingerCount) else {
-            if (3...4).contains(fingerCount) || _multitouchActive {
+        let fingerCount = multitouch.currentFingerCount
+        guard multitouch.isMultitouchActive, (3...4).contains(fingerCount) else {
+            if (3...4).contains(fingerCount) || multitouch.isMultitouchActive {
                 PadiumLogger.gesture.notice(
-                    "TAP-DIAG: click pass-through preconditions fc=\(fingerCount) multitouch=\(self._multitouchActive) appInteraction=\(self._appInteractionActive)"
+                    "TAP-DIAG: click pass-through preconditions fc=\(fingerCount) multitouch=\(multitouch.isMultitouchActive) appInteraction=\(self._appInteractionActive)"
                 )
             }
             os_unfair_lock_unlock(&_lock)
@@ -461,7 +371,7 @@ final class ScrollSuppressor: @unchecked Sendable, PhysicalClickCoordinating, Mu
         let configuredSlots = configuredClickSlotsResolver(fingerCount)
         guard configuredSlots.single != nil || configuredSlots.double != nil else {
             PadiumLogger.gesture.notice(
-                "TAP-DIAG: click pass-through noConfiguredSlots fc=\(fingerCount) multitouch=\(self._multitouchActive)"
+                "TAP-DIAG: click pass-through noConfiguredSlots fc=\(fingerCount) multitouch=\(multitouch.isMultitouchActive)"
             )
             os_unfair_lock_unlock(&_lock)
             return .passThrough

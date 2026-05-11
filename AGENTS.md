@@ -1,6 +1,6 @@
 # Padium — Agent Memory
 
-**Updated:** 2026-04-19 16:02
+**Updated:** 2026-05-12 00:08
 **Commit:** working tree
 **Branch:** main
 
@@ -56,6 +56,7 @@ PadiumApp (@main)
     ├─ GestureEngine — AsyncStream pipeline: source → classifier → filtered events
     │   ├─ MultitouchGestureSource — local multi-device MultitouchSupport bridge
     │   └─ GestureClassifier — swipe classification + tap travel helper
+    ├─ MultitouchState — thread-safe shared seam between the pipeline (writes via MultitouchStateSink) and the CGEventTap (reads via shouldSuppressScroll / snapshot)
     └─ ShortcutEmitter — ShortcutRegistry lookup → CGEvent key-down/key-up post
 ```
 
