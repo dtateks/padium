@@ -48,15 +48,6 @@ final class DispatchPhysicalClickWork: PhysicalClickScheduledWork {
     }
 }
 
-/// Write-only surface of multitouch state used by the gesture pipeline to keep
-/// scroll suppression and the trackpad-active flag in sync with the touch stream.
-/// `MultitouchState` is the production implementation; tests use lightweight
-/// stubs.
-protocol MultitouchStateSink: AnyObject, Sendable {
-    var currentFingerCount: Int { get set }
-    var isMultitouchActive: Bool { get set }
-}
-
 /// Orchestration-facing surface of the scroll suppressor: lifecycle, physical-click
 /// routing, and the post-click touch-tap guard. Multitouch state lives in a
 /// dedicated `MultitouchState` instance shared between the suppressor and the
@@ -79,10 +70,13 @@ protocol PhysicalClickCoordinating: AnyObject, Sendable {
 /// `MultitouchState`; the physical-click state machine lives here.
 ///
 /// Thread-safety: click-pipeline state (`_leftMouseState`,
-/// `_lastPhysicalClickAtByFingerCount`, etc.) is guarded by `_lock`. The
-/// suppressor never holds `_lock` while calling back into `multitouchState`
-/// in a way that could create a reverse-order dependency — lock order is
-/// `_lock` → multitouchState's internal lock, never the reverse.
+/// `_lastPhysicalClickAtByFingerCount`, etc.) is guarded by `_lock`.
+/// `multitouchState` has its own internal lock. The two locks are never
+/// held simultaneously: `handleLeftMouseDown` snapshots multitouch state
+/// before acquiring `_lock`, and the scroll-suppression decision path
+/// never touches `_lock`. This rules out the only nesting that could
+/// deadlock with the pipeline writing through the `MultitouchStateSink`
+/// surface from the main actor.
 final class ScrollSuppressor: @unchecked Sendable, PhysicalClickCoordinating {
 
     typealias PhysicalClickHandler = @Sendable (GestureEvent) -> Void

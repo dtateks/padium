@@ -2,6 +2,15 @@ import CoreGraphics
 import Foundation
 import os
 
+/// Write-only surface of the multitouch state used by the gesture pipeline to
+/// keep scroll suppression and the trackpad-active flag in sync with the touch
+/// stream. `MultitouchState` is the production implementation; tests use
+/// lightweight stubs (`RecordingMultitouchStateSink`).
+protocol MultitouchStateSink: AnyObject, Sendable {
+    var currentFingerCount: Int { get set }
+    var isMultitouchActive: Bool { get set }
+}
+
 /// Thread-safe holder of the multitouch state shared between the gesture
 /// pipeline and the scroll suppressor's CGEventTap.
 ///
