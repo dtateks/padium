@@ -1,6 +1,6 @@
 # Padium — Agent Memory
 
-**Updated:** 2026-05-12 01:10
+**Updated:** 2026-05-12 01:30
 **Commit:** working tree
 **Branch:** main
 
@@ -48,16 +48,18 @@ Bundle ID: `com.padium`, version 0.1.0. LSUIElement=true (no Dock icon).
 ## Architecture
 ```
 PadiumApp (@main)
-├─ Window(id: "settings") — TabView
-│   ├─ PermissionsView (Tab 1) — Accessibility status + System Settings link
-│   └─ SettingsView (Tab 2) — KeyboardShortcuts.Recorder per slot
+├─ Window(id: "settings") — SettingsContentView (single window, no TabView)
 └─ AppState (@Observable, orchestration boundary)
     ├─ PermissionCoordinator — capability polling: Accessibility, Input Monitoring, Post Event
+    ├─ PreemptionController — system trackpad gesture conflict policy (read-only)
+    ├─ SystemGestureManager — suppress/restore conflicting macOS gestures (defaults write + Dock restart)
     ├─ GestureEngine — AsyncStream pipeline: source → classifier → filtered events
     │   ├─ MultitouchGestureSource — local multi-device MultitouchSupport bridge
     │   └─ GestureClassifier — swipe classification + tap travel helper
-    ├─ MultitouchState — thread-safe shared seam between the pipeline (writes via MultitouchStateSink) and the CGEventTap (reads via shouldSuppressScroll / snapshot)
-    └─ ShortcutEmitter — ShortcutRegistry lookup → CGEvent key-down/key-up post
+    ├─ MultitouchState — thread-safe shared seam between the touch pipeline (writes via MultitouchStateSink) and the scroll suppressor's CGEventTap (reads via shouldSuppressScroll / snapshot)
+    ├─ ScrollSuppressor — CGEventTap: scroll suppression + physical 3/4-finger click coordination
+    ├─ ShortcutEmitter — ShortcutRegistry lookup → CGEvent key-down/key-up post (via ShortcutEventSequence)
+    └─ MiddleClickEmitter — synthetic middle-click CGEvent post (marked via PadiumSyntheticEventMarker)
 ```
 
 ## Runtime Pipeline
@@ -98,7 +100,7 @@ Physical click path: `ScrollSuppressor` CGEventTap detects configured 3/4-finger
 - `@MainActor` on all UI-bound and state classes
 - Views are thin: render state only, no side-effect orchestration
 - Protocols for DI boundaries: `GestureSource`, `GestureRuntimeControlling`, `ShortcutEmitting`, `MiddleClickEmitting`, `PreemptionControlling`, `SystemGestureManaging`, `PhysicalClickCoordinating`, `MultitouchStateSink`, `PermissionChecking`
-- `PhysicalClickCoordinating` inherits `MultitouchStateSink`, so a single coordinator instance both gates physical clicks and absorbs the touch pipeline's per-frame state writes. `AppState` takes `scrollSuppressor: (any PhysicalClickCoordinating)? = nil` (defaults to a fresh `ScrollSuppressor()` it owns) and forwards that same instance to `GestureEngine` as `multitouchSink`. `GestureEngine.multitouchSink` is required — there is no `ScrollSuppressor.shared` fallback. Tests inject a `RecordingPhysicalClickCoordinator` (or a standalone `RecordingMultitouchStateSink` when only the sink surface is needed)
+- `PhysicalClickCoordinating` is the orchestration-facing surface of the scroll suppressor (lifecycle + click handler + app-interaction state + touch-tap guard). It does NOT inherit `MultitouchStateSink` — multitouch state lives in a dedicated `MultitouchState` instance that `AppState` creates once per session and threads to both `GestureEngine` (as `multitouchSink:`, writer) and `ScrollSuppressor` (as `multitouchState:`, reader). `AppState` takes `scrollSuppressor: (any PhysicalClickCoordinating)? = nil` (defaults to a fresh `ScrollSuppressor()` wired to the shared `MultitouchState`); `GestureEngine.multitouchSink` is required. Lock order across the two locks is `ScrollSuppressor._lock` → `MultitouchState.lock`; the suppressor snapshots multitouch state before acquiring its own lock, so the two locks are never held simultaneously. Tests inject `RecordingPhysicalClickCoordinator` for the click-coordination surface, `RecordingMultitouchStateSink` (or a real `MultitouchState`) for the sink surface
 - `@discardableResult` on `start()`/`emitConfiguredShortcut()` methods
 - Logging via `PadiumLogger` (OSLog): categories `gesture`, `shortcut`, `permission`
 - Classifier thresholds are empirically derived — do NOT change without new evidence; swipe sensitivity and tap/double-tap thresholds are intentionally separate
@@ -114,16 +116,23 @@ Physical click path: `ScrollSuppressor` CGEventTap detects configured 3/4-finger
 | Task | Location |
 |------|----------|
 | App entry / scene setup | `Padium/PadiumApp.swift` |
+| App delegate / window + frontmost-app orchestration | `Padium/AppDelegate.swift` |
 | Activation permission refresh | `Padium/PadiumApp.swift` |
 | Launch-at-login (SMAppService) | `Padium/LaunchAtLoginManager.swift` |
 | Runtime orchestration | `Padium/AppState.swift` |
 | Gesture detection pipeline | `Padium/GestureEngine.swift` → `GestureClassifier.swift` |
 | Sensitivity setting + tap calibration constants | `Padium/GestureCalibration.swift` |
 | Multitouch hardware bridge | `Padium/MultitouchGestureSource.swift` + `Padium/MultitouchBridge.m` |
+| Multitouch shared state + scroll-suppression decision | `Padium/MultitouchState.swift` |
+| Scroll suppression + physical click CGEventTap | `Padium/ScrollSuppressor.swift` |
 | Shortcut emission | `Padium/ShortcutEmitter.swift` |
+| Pure shortcut event step sequence (modifier-aware) | `Padium/ShortcutEventSequence.swift` |
 | Middle-click emission | `Padium/MiddleClickEmitter.swift` |
+| Padium-originated CGEvent marker (cross-cutting) | `Padium/PadiumSyntheticEventMarker.swift` |
+| Hot-key guard preventing KeyboardShortcuts from owning gesture chords | `Padium/ShortcutHotKeyGuard.swift` |
 | Permission logic | `Padium/PermissionCoordinator.swift` |
-| System gesture policy | `Padium/PreemptionController.swift` |
+| System gesture conflict policy (read) | `Padium/PreemptionController.swift` |
+| System gesture suppress/restore (write) | `Padium/SystemGestureManager.swift` |
 | Slot↔shortcut mapping | `Padium/ShortcutRegistry.swift` |
 
 <!-- code-review-graph MCP tools -->
