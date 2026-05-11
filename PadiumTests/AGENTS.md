@@ -23,7 +23,8 @@
 | Test File | Component | What's Verified |
 |-----------|-----------|-----------------|
 | TestSupport.swift | Shared fixtures | DI stubs/recorders, gesture-config snapshot+preserve, CGEvent helpers — no test cases |
-| GestureEngineTests.swift | GestureEngine | Start/stop lifecycle, stream restart, policy slot filtering, stable-ID commit, duplicate suppression until lift, tap/double-tap arbitration across configured finger counts, unsupported 4-finger prelude suppression, 2-finger tap pair-shape acceptance/rejection, stable full-finger contact-set gating, single-device multitouch arbitration in `MultitouchGestureSource` |
+| GestureEngineTests.swift | GestureEngine | Start/stop lifecycle, stream restart, policy slot filtering, stable-ID commit, duplicate suppression until lift, tap/double-tap arbitration across configured finger counts, unsupported 4-finger prelude suppression, 2-finger tap pair-shape acceptance/rejection, stable full-finger contact-set gating |
+| MultitouchGestureSourceTests.swift | MultitouchGestureSource | Single-device frame arbitration, second-device suppression while first active, device switch after lift, device switch after reset, device-reset emits lift before same-device-ID frames |
 | GestureClassifierTests.swift | GestureClassifier | All 8 swipe directions, finger count gating, stable IDs, dominant-axis rejection, lateral-drift tolerance on vertical swipes, opposing-direction rejection, threshold rejection, and 2-finger tap pair-shape drift/deformation checks |
 | PermissionCoordinatorTests.swift | PermissionCoordinator | Capability checks (`permissionState` / `inputMonitoringState` / `postEventState`), revocation transitions, request delegation |
 | AppStateTests.swift | AppState | Runtime auto-start under granted/denied permissions, degraded modes, KeyboardShortcuts-driven config propagation, system gesture suppression, sensitivity changes, middle-click action kind, runtime separation under partial failures |

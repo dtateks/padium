@@ -40,6 +40,7 @@
 		AA0101020209 /* LaunchAtLoginManagerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0301020209 /* LaunchAtLoginManagerTests.swift */; };
 		AA010102020A /* ScrollSuppressorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA030102020A /* ScrollSuppressorTests.swift */; };
 		AA010102020B /* ShortcutHotKeyGuardTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA030102020B /* ShortcutHotKeyGuardTests.swift */; };
+		AA010102020C /* MultitouchGestureSourceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA030102020C /* MultitouchGestureSourceTests.swift */; };
 		AA0101030302 /* KeyboardShortcuts in Frameworks */ = {isa = PBXBuildFile; productRef = AA0701030302 /* KeyboardShortcuts */; };
 		AA0101030303 /* KeyboardShortcuts in Frameworks */ = {isa = PBXBuildFile; productRef = AA0701030303 /* KeyboardShortcuts */; };
 /* End PBXBuildFile section */
@@ -81,6 +82,7 @@
 		AA0301020209 /* LaunchAtLoginManagerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LaunchAtLoginManagerTests.swift; sourceTree = "<group>"; };
 		AA030102020A /* ScrollSuppressorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScrollSuppressorTests.swift; sourceTree = "<group>"; };
 		AA030102020B /* ShortcutHotKeyGuardTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShortcutHotKeyGuardTests.swift; sourceTree = "<group>"; };
+		AA030102020C /* MultitouchGestureSourceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MultitouchGestureSourceTests.swift; sourceTree = "<group>"; };
 		AA0401010101 /* Padium.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Padium.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		AA0402020202 /* PadiumTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = PadiumTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
@@ -162,6 +164,7 @@
 				AA0301020209 /* LaunchAtLoginManagerTests.swift */,
 				AA030102020A /* ScrollSuppressorTests.swift */,
 				AA030102020B /* ShortcutHotKeyGuardTests.swift */,
+				AA030102020C /* MultitouchGestureSourceTests.swift */,
 				AA0301020206 /* TestSupport.swift */,
 			);
 			path = PadiumTests;
@@ -313,6 +316,7 @@
 				AA0101020209 /* LaunchAtLoginManagerTests.swift in Sources */,
 				AA010102020A /* ScrollSuppressorTests.swift in Sources */,
 				AA010102020B /* ShortcutHotKeyGuardTests.swift in Sources */,
+				AA010102020C /* MultitouchGestureSourceTests.swift in Sources */,
 				AA0101020206 /* TestSupport.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
