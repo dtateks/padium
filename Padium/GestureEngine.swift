@@ -1,6 +1,15 @@
 import Foundation
 
 @MainActor
+protocol GestureRuntimeControlling: AnyObject {
+    var events: AsyncStream<GestureEvent> { get }
+    var lastStartError: GestureEngineError? { get }
+    @discardableResult func start() -> Bool
+    func stop()
+    func updateActiveSlots(_ activeSlots: Set<GestureSlot>)
+}
+
+@MainActor
 protocol GestureScheduledWork: AnyObject {
     func cancel()
 }
@@ -136,32 +145,24 @@ final class GestureEngine {
 
     init(
         source: any GestureSource,
+        classifier: GestureClassifier? = nil,
         supportedSlots: Set<GestureSlot>,
         scheduler: (any GestureScheduling)? = nil,
-        multitouchSink: (any MultitouchStateSink)? = nil
+        multitouchSink: any MultitouchStateSink
     ) {
         self.source = source
-        self.classifierFactory = { GestureClassifier() }
+        // When a fixed classifier is provided, reuse it across every `start()`.
+        // Otherwise build a fresh one each start so it reads live shared
+        // sensitivity from UserDefaults without an engine restart.
+        if let classifier {
+            self.classifierFactory = { classifier }
+        } else {
+            self.classifierFactory = { GestureClassifier() }
+        }
         self.scheduler = scheduler ?? TaskGestureScheduler()
         self.supportedSlots = supportedSlots
         self.activeSlots = supportedSlots
-        self.multitouchSink = multitouchSink ?? ScrollSuppressor.shared
-        (events, continuation) = AsyncStream<GestureEvent>.makeStream()
-    }
-
-    init(
-        source: any GestureSource,
-        classifier: GestureClassifier,
-        supportedSlots: Set<GestureSlot>,
-        scheduler: (any GestureScheduling)? = nil,
-        multitouchSink: (any MultitouchStateSink)? = nil
-    ) {
-        self.source = source
-        self.classifierFactory = { classifier }
-        self.scheduler = scheduler ?? TaskGestureScheduler()
-        self.supportedSlots = supportedSlots
-        self.activeSlots = supportedSlots
-        self.multitouchSink = multitouchSink ?? ScrollSuppressor.shared
+        self.multitouchSink = multitouchSink
         (events, continuation) = AsyncStream<GestureEvent>.makeStream()
     }
 
@@ -648,6 +649,8 @@ final class GestureEngine {
         continuation.yield(GestureEvent(slot: slot, timestamp: timestamp))
     }
 }
+
+extension GestureEngine: GestureRuntimeControlling {}
 
 enum GestureEngineError: Error {
     case sourceUnavailable(underlying: Error)

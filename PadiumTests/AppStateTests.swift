@@ -41,7 +41,6 @@ struct AppStateTests {
             KeyboardShortcuts.setShortcut(nil, for: ShortcutRegistry.name(for: slot))
             GestureActionStore.setActionKind(.shortcut, for: slot)
         }
-        ScrollSuppressor.shared.stop()
     }
 
     @Test @MainActor func initialStateNotRunning() {

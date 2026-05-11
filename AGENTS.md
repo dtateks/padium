@@ -97,7 +97,7 @@ Physical click path: `ScrollSuppressor` CGEventTap detects configured 3/4-finger
 - `@MainActor` on all UI-bound and state classes
 - Views are thin: render state only, no side-effect orchestration
 - Protocols for DI boundaries: `GestureSource`, `GestureRuntimeControlling`, `ShortcutEmitting`, `MiddleClickEmitting`, `PreemptionControlling`, `SystemGestureManaging`, `PhysicalClickCoordinating`, `MultitouchStateSink`, `PermissionChecking`
-- `AppState` takes `scrollSuppressor: (any PhysicalClickCoordinating)? = nil`; `GestureEngine` takes `multitouchSink: (any MultitouchStateSink)? = nil`. Defaults point at `ScrollSuppressor.shared`
+- `PhysicalClickCoordinating` inherits `MultitouchStateSink`, so a single coordinator instance both gates physical clicks and absorbs the touch pipeline's per-frame state writes. `AppState` takes `scrollSuppressor: (any PhysicalClickCoordinating)? = nil` (defaults to a fresh `ScrollSuppressor()` it owns) and forwards that same instance to `GestureEngine` as `multitouchSink`. `GestureEngine.multitouchSink` is required — there is no `ScrollSuppressor.shared` fallback. Tests inject a `RecordingPhysicalClickCoordinator` (or a standalone `RecordingMultitouchStateSink` when only the sink surface is needed)
 - `@discardableResult` on `start()`/`emitConfiguredShortcut()` methods
 - Logging via `PadiumLogger` (OSLog): categories `gesture`, `shortcut`, `permission`
 - Classifier thresholds are empirically derived — do NOT change without new evidence; swipe sensitivity and tap/double-tap thresholds are intentionally separate

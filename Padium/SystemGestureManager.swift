@@ -1,6 +1,14 @@
 import AppKit
 import Foundation
 
+@MainActor
+protocol SystemGestureManaging: AnyObject {
+    var isSuppressed: Bool { get }
+    func suppress(conflictingSettings: [SystemGestureSetting], allSettings: [SystemGestureSetting])
+    func restore()
+    func restoreIfNeeded()
+}
+
 /// Saves, disables, and restores macOS system trackpad gesture preferences.
 ///
 /// On `suppress()`: reads current values, backs them up to UserDefaults, writes 0 to each
@@ -9,7 +17,7 @@ import Foundation
 ///
 /// Backup is persisted so that even after a crash the next launch can restore original settings.
 @MainActor
-final class SystemGestureManager {
+final class SystemGestureManager: SystemGestureManaging {
 
     static let shared = SystemGestureManager()
 

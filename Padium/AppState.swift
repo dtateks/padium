@@ -4,43 +4,6 @@ import Foundation
 import KeyboardShortcuts
 import os
 
-@MainActor
-protocol GestureRuntimeControlling: AnyObject {
-    var events: AsyncStream<GestureEvent> { get }
-    var lastStartError: GestureEngineError? { get }
-    @discardableResult func start() -> Bool
-    func stop()
-    func updateActiveSlots(_ activeSlots: Set<GestureSlot>)
-}
-
-@MainActor
-protocol ShortcutEmitting: AnyObject {
-    @discardableResult func emitConfiguredShortcut(for slot: GestureSlot) -> Bool
-}
-
-extension GestureEngine: GestureRuntimeControlling {}
-extension ShortcutEmitter: ShortcutEmitting {}
-
-@MainActor
-protocol PreemptionControlling: AnyObject {
-    func currentPolicy(activeSlots: Set<GestureSlot>) -> PreemptionPolicy
-    func currentSystemGestureSettings() -> [SystemGestureSetting]
-    func conflictingSettings(for activeSlots: Set<GestureSlot>) -> [SystemGestureSetting]
-    func conflictingSlots(for activeSlots: Set<GestureSlot>) -> Set<GestureSlot>
-    func openTrackpadSettings()
-}
-
-@MainActor
-protocol SystemGestureManaging: AnyObject {
-    var isSuppressed: Bool { get }
-    func suppress(conflictingSettings: [SystemGestureSetting], allSettings: [SystemGestureSetting])
-    func restore()
-    func restoreIfNeeded()
-}
-
-extension PreemptionController: PreemptionControlling {}
-extension SystemGestureManager: SystemGestureManaging {}
-
 enum PadiumNotification {
     static let configurationDidChange = Notification.Name("Padium_configurationDidChange")
     // Mirrors KeyboardShortcuts' private notification name. Kept as a literal
@@ -157,22 +120,21 @@ final class AppState {
         self.defaultsObserver = nil
         self.shortcutObserver = nil
 
-        let resolvedScrollSuppressor = scrollSuppressor ?? ScrollSuppressor.shared
+        let resolvedScrollSuppressor = scrollSuppressor ?? ScrollSuppressor()
         self.scrollSuppressor = resolvedScrollSuppressor
 
         if let gestureEngine {
             self.gestureEngine = gestureEngine
         } else {
-            // Pass the same suppressor instance the AppState owns so the touch
-            // pipeline writes `isMultitouchActive`/`currentFingerCount` into the
-            // exact coordinator that gates physical clicks. Falling back to
-            // ScrollSuppressor.shared independently would leave the invariant
-            // implicit and fragile under future test injection.
-            let resolvedSink = resolvedScrollSuppressor as? any MultitouchStateSink ?? ScrollSuppressor.shared
+            // Same instance flows in two roles: the touch pipeline writes
+            // `currentFingerCount`/`isMultitouchActive` through the inherited
+            // `MultitouchStateSink` surface, and the CGEventTap reads them to
+            // gate physical clicks. The protocol composition makes that
+            // identity explicit at the type level instead of a runtime cast.
             self.gestureEngine = GestureEngine(
                 source: MultitouchGestureSource(),
                 supportedSlots: Set(supportedGestureSlots),
-                multitouchSink: resolvedSink
+                multitouchSink: resolvedScrollSuppressor
             )
         }
 

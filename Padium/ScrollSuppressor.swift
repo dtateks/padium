@@ -48,23 +48,24 @@ final class DispatchPhysicalClickWork: PhysicalClickScheduledWork {
     }
 }
 
+/// Write-only surface of multitouch state used by the gesture pipeline to keep
+/// scroll suppression and the trackpad-active flag in sync with the touch stream.
+protocol MultitouchStateSink: AnyObject, Sendable {
+    var currentFingerCount: Int { get set }
+    var isMultitouchActive: Bool { get set }
+}
+
 /// Orchestration-facing surface of the scroll suppressor: lifecycle, physical-click
-/// routing, and the post-click touch-tap guard. Narrowed so AppState depends on
-/// behaviour rather than a shared singleton.
-protocol PhysicalClickCoordinating: AnyObject, Sendable {
+/// routing, and the post-click touch-tap guard. Inherits `MultitouchStateSink` so
+/// the same instance AppState injects also absorbs the touch pipeline's per-frame
+/// state writes — no shared singleton fallback, no upcast at the wiring seam.
+protocol PhysicalClickCoordinating: MultitouchStateSink {
     typealias ClickHandler = @Sendable (GestureEvent) -> Void
     func setPhysicalClickHandler(_ handler: ClickHandler?)
     func setAppInteractionActive(_ isActive: Bool)
     @discardableResult func start() -> Bool
     func stop()
     func shouldAllowTouchTap(fingerCount: Int, at timestamp: Date) -> Bool
-}
-
-/// Write-only surface of multitouch state used by the gesture pipeline to keep
-/// scroll suppression and the trackpad-active flag in sync with the touch stream.
-protocol MultitouchStateSink: AnyObject, Sendable {
-    var currentFingerCount: Int { get set }
-    var isMultitouchActive: Bool { get set }
 }
 
 /// Suppresses macOS scroll wheel events while 3+ finger multitouch is active.
@@ -91,8 +92,6 @@ final class ScrollSuppressor: @unchecked Sendable, PhysicalClickCoordinating, Mu
         case passThrough
         case suppress
     }
-
-    static let shared = ScrollSuppressor()
 
     private enum LeftMouseState {
         case idle

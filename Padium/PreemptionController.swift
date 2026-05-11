@@ -17,7 +17,16 @@ struct SystemGestureSetting: Identifiable, Sendable {
 }
 
 @MainActor
-final class PreemptionController {
+protocol PreemptionControlling: AnyObject {
+    func currentPolicy(activeSlots: Set<GestureSlot>) -> PreemptionPolicy
+    func currentSystemGestureSettings() -> [SystemGestureSetting]
+    func conflictingSettings(for activeSlots: Set<GestureSlot>) -> [SystemGestureSetting]
+    func conflictingSlots(for activeSlots: Set<GestureSlot>) -> Set<GestureSlot>
+    func openTrackpadSettings()
+}
+
+@MainActor
+final class PreemptionController: PreemptionControlling {
     private let trackpadPreferenceDomain = "com.apple.AppleMultitouchTrackpad"
 
     func currentPolicy(activeSlots: Set<GestureSlot> = Set(GestureSlot.allCases)) -> PreemptionPolicy {

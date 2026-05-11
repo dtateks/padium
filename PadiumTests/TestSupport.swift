@@ -34,7 +34,6 @@ struct GestureConfigurationSnapshot {
         }
         UserDefaults.standard.removeObject(forKey: sensitivityKey)
         UserDefaults.standard.synchronize()
-        ScrollSuppressor.shared.stop()
     }
 
     func restore() {
@@ -50,7 +49,6 @@ struct GestureConfigurationSnapshot {
         }
 
         UserDefaults.standard.synchronize()
-        ScrollSuppressor.shared.stop()
     }
 }
 
@@ -314,6 +312,8 @@ final class RecordingPhysicalClickCoordinator: PhysicalClickCoordinating, @unche
     private(set) var stopCallCount = 0
     private(set) var appInteractionStates: [Bool] = []
     var shouldAllowTouchTapResult = true
+    var currentFingerCount: Int = 0
+    var isMultitouchActive: Bool = false
     private var handler: ClickHandler?
 
     init(startResult: Bool = true) {
@@ -347,6 +347,11 @@ final class RecordingPhysicalClickCoordinator: PhysicalClickCoordinating, @unche
         shouldAllowTouchTapResult = !blockTouchTap
         handler?(GestureEvent(slot: slot, timestamp: Date()))
     }
+}
+
+final class RecordingMultitouchStateSink: MultitouchStateSink, @unchecked Sendable {
+    var currentFingerCount: Int = 0
+    var isMultitouchActive: Bool = false
 }
 
 @MainActor

@@ -199,13 +199,15 @@ struct GestureEngineTests {
     private func makeEngine(
         source: StubGestureSource,
         supportedSlots: Set<GestureSlot> = Set(GestureSlot.allCases),
-        scheduler: (any GestureScheduling)? = nil
+        scheduler: (any GestureScheduling)? = nil,
+        multitouchSink: any MultitouchStateSink = RecordingMultitouchStateSink()
     ) -> GestureEngine {
         GestureEngine(
             source: source,
             classifier: GestureClassifier(swipeThreshold: testSwipeThreshold),
             supportedSlots: supportedSlots,
-            scheduler: scheduler
+            scheduler: scheduler,
+            multitouchSink: multitouchSink
         )
     }
 
@@ -979,18 +981,20 @@ struct GestureEngineTests {
     @Test func twoFingerTapDoesNotEnableScrollSuppression() async {
         let source = StubGestureSource()
         let scheduler = ManualGestureScheduler()
+        let sink = RecordingMultitouchStateSink()
         let engine = makeEngine(
             source: source,
             supportedSlots: [.twoFingerDoubleTap],
-            scheduler: scheduler
+            scheduler: scheduler,
+            multitouchSink: sink
         )
         engine.start()
 
         source.yieldFrame(makeTapFrames(fingerCount: 2)[0])
         await flushPipeline()
 
-        #expect(ScrollSuppressor.shared.currentFingerCount == 2)
-        #expect(ScrollSuppressor.shared.isMultitouchActive == false)
+        #expect(sink.currentFingerCount == 2)
+        #expect(sink.isMultitouchActive == false)
 
         engine.stop()
     }

@@ -3,6 +3,11 @@ import Carbon
 import KeyboardShortcuts
 
 @MainActor
+protocol ShortcutEmitting: AnyObject {
+    @discardableResult func emitConfiguredShortcut(for slot: GestureSlot) -> Bool
+}
+
+@MainActor
 protocol MiddleClickEmitting: AnyObject {
     @discardableResult func emitMiddleClick() -> Bool
 }
@@ -147,7 +152,7 @@ final class CGEventShortcutSender: ShortcutSending {
 // Looks up the configured shortcut for a gesture slot and posts it.
 // Returns false without crashing when the slot has no shortcut bound.
 @MainActor
-final class ShortcutEmitter {
+final class ShortcutEmitter: ShortcutEmitting {
     private let sender: any ShortcutSending
 
     init(sender: any ShortcutSending = CGEventShortcutSender()) {
