@@ -28,6 +28,8 @@ extension ShortcutEmitter: ShortcutEmitting {}
 
 @MainActor
 final class MiddleClickEmitter: MiddleClickEmitting {
+    private static let buttonNumber = Int64(CGMouseButton.center.rawValue)
+
     @discardableResult
     func emitMiddleClick() -> Bool {
         guard let src = CGEventSource(stateID: .hidSystemState) else { return false }
@@ -42,11 +44,17 @@ final class MiddleClickEmitter: MiddleClickEmitting {
             return false
         }
 
-        ScrollSuppressor.configureMiddleClickEvent(down, clickState: 1)
-        ScrollSuppressor.configureMiddleClickEvent(up, clickState: 1)
+        Self.configure(down, clickState: 1)
+        Self.configure(up, clickState: 1)
         down.post(tap: .cghidEventTap)
         up.post(tap: .cghidEventTap)
         return true
+    }
+
+    private static func configure(_ event: CGEvent, clickState: Int64) {
+        event.setIntegerValueField(.mouseEventButtonNumber, value: buttonNumber)
+        event.setIntegerValueField(.mouseEventClickState, value: clickState)
+        PadiumSyntheticEventMarker.mark(event)
     }
 }
 
@@ -70,8 +78,13 @@ protocol SystemGestureManaging: AnyObject {
 extension PreemptionController: PreemptionControlling {}
 extension SystemGestureManager: SystemGestureManaging {}
 
-private let keyboardShortcutDidChangeNotification = Notification.Name("KeyboardShortcuts_shortcutByNameDidChange")
-let configurationDidChangeNotification = Notification.Name("Padium_configurationDidChange")
+enum PadiumNotification {
+    static let configurationDidChange = Notification.Name("Padium_configurationDidChange")
+    // Mirrors KeyboardShortcuts' private notification name. Kept as a literal
+    // string because the package does not expose it publicly; changes there
+    // need a matching update here.
+    static let keyboardShortcutDidChange = Notification.Name("KeyboardShortcuts_shortcutByNameDidChange")
+}
 
 enum RuntimeStatus: Equatable, Sendable {
     case checking
@@ -205,7 +218,7 @@ final class AppState {
             }
         }
         shortcutObserver = NotificationCenter.default.addObserver(
-            forName: keyboardShortcutDidChangeNotification,
+            forName: PadiumNotification.keyboardShortcutDidChange,
             object: nil,
             queue: nil
         ) { [weak self] _ in
@@ -297,7 +310,7 @@ final class AppState {
         GestureSensitivitySetting.store(clamped)
         UserDefaults.standard.synchronize()
         if refreshStoredConfigurationIfNeeded() {
-            NotificationCenter.default.post(name: configurationDidChangeNotification, object: nil)
+            NotificationCenter.default.post(name: PadiumNotification.configurationDidChange, object: nil)
         }
     }
 
@@ -391,7 +404,7 @@ final class AppState {
         // unexpected termination or rebuild-kill sequences.
         UserDefaults.standard.synchronize()
         refreshStoredConfigurationIfNeeded()
-        NotificationCenter.default.post(name: configurationDidChangeNotification, object: nil)
+        NotificationCenter.default.post(name: PadiumNotification.configurationDidChange, object: nil)
     }
 
     private func applySystemGestureSuppression() {

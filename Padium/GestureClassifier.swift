@@ -227,14 +227,6 @@ struct GestureClassifier: Sendable {
 
     // MARK: - Public helpers for engine
 
-    func isStableFrame(_ frame: [TouchPoint]) -> Bool {
-        stableActiveContacts(in: frame) != nil
-    }
-
-    func activeFingerCount(in frame: [TouchPoint]) -> Int {
-        stableActiveContacts(in: frame)?.count ?? 0
-    }
-
     func stableActiveContacts(
         in frame: [TouchPoint],
         expectedFingerCount: Int? = nil

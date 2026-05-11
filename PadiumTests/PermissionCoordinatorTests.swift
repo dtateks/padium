@@ -347,7 +347,7 @@ struct AppDelegateTests {
         var restoreCount = 0
         delegate.restorePreviousApplicationHandler = { restoreCount += 1 }
 
-        NotificationCenter.default.post(name: configurationDidChangeNotification, object: nil)
+        NotificationCenter.default.post(name: PadiumNotification.configurationDidChange, object: nil)
 
         #expect(restoreCount == 1)
     }
@@ -385,7 +385,7 @@ struct AppDelegateTests {
 
         delegate.observeSettingsWindow(window)
         NotificationCenter.default.post(name: NSWindow.didBecomeKeyNotification, object: window)
-        NotificationCenter.default.post(name: configurationDidChangeNotification, object: nil)
+        NotificationCenter.default.post(name: PadiumNotification.configurationDidChange, object: nil)
 
         #expect(restoreCount == 1)
         #expect(suppressor.appInteractionStates == [true, false])
@@ -707,7 +707,7 @@ struct AppStateTests {
         let state = makeState(checker: MockPermissionChecker(accessibility: true))
         let notificationCounter = NotificationCounter()
         let observer = NotificationCenter.default.addObserver(
-            forName: configurationDidChangeNotification,
+            forName: PadiumNotification.configurationDidChange,
             object: nil,
             queue: nil
         ) { _ in

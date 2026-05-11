@@ -36,7 +36,7 @@ enum ShortcutHotKeyGuard {
         disableAllRegisteredGestureShortcuts()
 
         observer = NotificationCenter.default.addObserver(
-            forName: .shortcutByNameDidChange,
+            forName: PadiumNotification.keyboardShortcutDidChange,
             object: nil,
             queue: nil
         ) { notification in
@@ -52,11 +52,7 @@ enum ShortcutHotKeyGuard {
         // use them) and explicitly disable every gesture name so each
         // configured shortcut is stripped from the Carbon hotkey registry.
         KeyboardShortcuts.removeAllHandlers()
-
-        let names = GestureSlot.allCases.map { slot in
-            ShortcutRegistry.name(for: slot)
-        }
-        KeyboardShortcuts.disable(names)
+        KeyboardShortcuts.disable(allGestureShortcutNames)
     }
 
     private static func handleShortcutChange(changedRawName: String?) {
@@ -68,13 +64,10 @@ enum ShortcutHotKeyGuard {
             return
         }
 
-        let names = GestureSlot.allCases.map { slot in
-            ShortcutRegistry.name(for: slot)
-        }
-        KeyboardShortcuts.disable(names)
+        KeyboardShortcuts.disable(allGestureShortcutNames)
     }
-}
 
-private extension Notification.Name {
-    static let shortcutByNameDidChange = Notification.Name("KeyboardShortcuts_shortcutByNameDidChange")
+    private static var allGestureShortcutNames: [KeyboardShortcuts.Name] {
+        GestureSlot.allCases.map(ShortcutRegistry.name(for:))
+    }
 }

@@ -210,7 +210,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         NotificationCenter.default.addObserver(
             self,
             selector: #selector(handleConfigurationDidChange(_:)),
-            name: configurationDidChangeNotification,
+            name: PadiumNotification.configurationDidChange,
             object: nil
         )
     }

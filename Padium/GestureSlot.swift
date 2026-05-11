@@ -70,25 +70,6 @@ enum GestureSlot: String, CaseIterable, Sendable {
         kind == .doubleTap
     }
 
-    var isPhysicalClickGesture: Bool {
-        kind == .click || kind == .doubleClick
-    }
-
-    var doubleTapSlot: GestureSlot? {
-        switch self {
-        case .oneFingerDoubleTap:
-            .oneFingerDoubleTap
-        case .twoFingerDoubleTap:
-            .twoFingerDoubleTap
-        case .threeFingerDoubleTap:
-            .threeFingerDoubleTap
-        case .fourFingerDoubleTap:
-            .fourFingerDoubleTap
-        default:
-            nil
-        }
-    }
-
     var displayName: String {
         switch self {
         case .oneFingerDoubleTap:    "Double Tap"
@@ -107,25 +88,6 @@ enum GestureSlot: String, CaseIterable, Sendable {
         case .fourFingerClick:       "Click"
         case .fourFingerDoubleClick: "Double Click"
         case .fourFingerDoubleTap:   "Double Tap"
-        }
-    }
-
-    var sectionTitle: String {
-        switch self {
-        case .oneFingerDoubleTap:
-            "1 Finger"
-        case .twoFingerDoubleTap:
-            "2 Finger"
-        case .threeFingerSwipeLeft, .threeFingerSwipeRight,
-             .threeFingerSwipeUp,   .threeFingerSwipeDown,
-             .threeFingerClick,     .threeFingerDoubleClick,
-             .threeFingerDoubleTap:
-            "3 Finger"
-        case .fourFingerSwipeLeft, .fourFingerSwipeRight,
-             .fourFingerSwipeUp,   .fourFingerSwipeDown,
-             .fourFingerClick,     .fourFingerDoubleClick,
-             .fourFingerDoubleTap:
-            "4 Finger"
         }
     }
 
