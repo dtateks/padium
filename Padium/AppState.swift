@@ -18,45 +18,8 @@ protocol ShortcutEmitting: AnyObject {
     @discardableResult func emitConfiguredShortcut(for slot: GestureSlot) -> Bool
 }
 
-@MainActor
-protocol MiddleClickEmitting: AnyObject {
-    @discardableResult func emitMiddleClick() -> Bool
-}
-
 extension GestureEngine: GestureRuntimeControlling {}
 extension ShortcutEmitter: ShortcutEmitting {}
-
-@MainActor
-final class MiddleClickEmitter: MiddleClickEmitting {
-    private static let buttonNumber = Int64(CGMouseButton.center.rawValue)
-
-    @discardableResult
-    func emitMiddleClick() -> Bool {
-        guard let src = CGEventSource(stateID: .hidSystemState) else { return false }
-        let frontmostBundleIdentifier = NSWorkspace.shared.frontmostApplication?.bundleIdentifier ?? "nil"
-        PadiumLogger.shortcut.notice(
-            "TAP-DIAG: middle click frontmost=\(frontmostBundleIdentifier, privacy: .public) appActive=\(NSApp.isActive)"
-        )
-        let position = CGEvent(source: nil)?.location ?? .zero
-        guard let down = CGEvent(mouseEventSource: src, mouseType: .otherMouseDown, mouseCursorPosition: position, mouseButton: .center),
-              let up = CGEvent(mouseEventSource: src, mouseType: .otherMouseUp, mouseCursorPosition: position, mouseButton: .center)
-        else {
-            return false
-        }
-
-        Self.configure(down, clickState: 1)
-        Self.configure(up, clickState: 1)
-        down.post(tap: .cghidEventTap)
-        up.post(tap: .cghidEventTap)
-        return true
-    }
-
-    private static func configure(_ event: CGEvent, clickState: Int64) {
-        event.setIntegerValueField(.mouseEventButtonNumber, value: buttonNumber)
-        event.setIntegerValueField(.mouseEventClickState, value: clickState)
-        PadiumSyntheticEventMarker.mark(event)
-    }
-}
 
 @MainActor
 protocol PreemptionControlling: AnyObject {
@@ -194,18 +157,27 @@ final class AppState {
         self.defaultsObserver = nil
         self.shortcutObserver = nil
 
+        let resolvedScrollSuppressor = scrollSuppressor ?? ScrollSuppressor.shared
+        self.scrollSuppressor = resolvedScrollSuppressor
+
         if let gestureEngine {
             self.gestureEngine = gestureEngine
         } else {
+            // Pass the same suppressor instance the AppState owns so the touch
+            // pipeline writes `isMultitouchActive`/`currentFingerCount` into the
+            // exact coordinator that gates physical clicks. Falling back to
+            // ScrollSuppressor.shared independently would leave the invariant
+            // implicit and fragile under future test injection.
+            let resolvedSink = resolvedScrollSuppressor as? any MultitouchStateSink ?? ScrollSuppressor.shared
             self.gestureEngine = GestureEngine(
                 source: MultitouchGestureSource(),
-                supportedSlots: Set(supportedGestureSlots)
+                supportedSlots: Set(supportedGestureSlots),
+                multitouchSink: resolvedSink
             )
         }
 
         self.shortcutEmitter = shortcutEmitter ?? ShortcutEmitter()
         self.middleClickEmitter = middleClickEmitter ?? MiddleClickEmitter()
-        self.scrollSuppressor = scrollSuppressor ?? ScrollSuppressor.shared
         self.gestureEngine.updateActiveSlots(configuredGestureSlots())
         refreshSystemGestureConflicts()
         defaultsObserver = NotificationCenter.default.addObserver(
