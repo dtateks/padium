@@ -1,6 +1,6 @@
 <!-- Scoped to PadiumTests/ directory. Root AGENTS.md covers test framework choice and determinism rule. -->
 
-**Updated:** 2026-04-19 15:24
+**Updated:** 2026-05-11 23:30
 **Commit:** working tree
 **Branch:** main
 
@@ -8,8 +8,8 @@
 
 - `@MainActor struct XxxTests` — all test structs are MainActor-isolated
 - Use `@Suite(.serialized)` when a test suite mutates shared user-default-backed configuration or singleton runtime state
-- `GestureEngineTests` stays serialized because it touches `ScrollSuppressor.shared` and other shared gesture runtime state
-- Stubs implement DI protocols: `StubGestureSource`, `StubPermissionChecker`, `StubShortcutSender`, `RecordingPhysicalClickCoordinator`
+- `GestureEngineTests` and `AppStateTests` stay serialized because they touch `ScrollSuppressor.shared` and other shared gesture runtime state
+- Cross-suite shared mocks live in `TestSupport.swift`: `MockPermissionChecker`, `StubPreemptionController`, `RecordingSystemGestureManager`, `RecordingLaunchAtLoginController`, `StubLoginItemService`, `RecordingGestureRuntime`, `RecordingPhysicalClickCoordinator`, `RecordingShortcutEmitter`, `RecordingUserDefaultsShortcutEmitter`, `RecordingMiddleClickEmitter`, plus `GestureConfigurationPreserver` and CGEvent helpers (`makeLeftClickEvent`, `makeMenuBarClickLocation`). File-private helpers stay co-located with the test file that uses them
 - Stubs expose call counts (`startCallCount`, `stopCallCount`) and controllable async streams
 - Frame helpers like `makeSwipeFrames(fingerCount:startX:startY:endX:endY:)` and tap/double-tap builders build `[[TouchPoint]]` for classifier/engine tests
 - Async pipeline tests: yield frames into stub source → `Task.yield()` to flush → assert on collected events
@@ -22,9 +22,14 @@
 
 | Test File | Component | What's Verified |
 |-----------|-----------|-----------------|
+| TestSupport.swift | Shared fixtures | DI stubs/recorders, gesture-config snapshot+preserve, CGEvent helpers — no test cases |
 | GestureEngineTests.swift | GestureEngine | Start/stop lifecycle, stream restart, policy slot filtering, stable-ID commit, duplicate suppression until lift, tap/double-tap arbitration across configured finger counts, unsupported 4-finger prelude suppression, 2-finger tap pair-shape acceptance/rejection, stable full-finger contact-set gating, single-device multitouch arbitration in `MultitouchGestureSource` |
 | GestureClassifierTests.swift | GestureClassifier | All 8 swipe directions, finger count gating, stable IDs, dominant-axis rejection, lateral-drift tolerance on vertical swipes, opposing-direction rejection, threshold rejection, and 2-finger tap pair-shape drift/deformation checks |
-| PermissionCoordinatorTests.swift | PermissionCoordinator / AppState / ScrollSuppressor | Capability checks (`permissionState` / `inputMonitoringState` / `postEventState`), degraded startup modes, startup prompts, KeyboardShortcuts-driven config propagation, and runtime separation under partial failures |
+| PermissionCoordinatorTests.swift | PermissionCoordinator | Capability checks (`permissionState` / `inputMonitoringState` / `postEventState`), revocation transitions, request delegation |
+| AppStateTests.swift | AppState | Runtime auto-start under granted/denied permissions, degraded modes, KeyboardShortcuts-driven config propagation, system gesture suppression, sensitivity changes, middle-click action kind, runtime separation under partial failures |
+| AppDelegateTests.swift | AppDelegate | Settings window orchestration, frontmost-app restore, launch-at-login approval handling, app-interaction key/resign tracking |
+| LaunchAtLoginManagerTests.swift | LaunchAtLoginManager | SMAppService registration paths, requires-approval handling, launched-at-login Apple event detection |
+| ScrollSuppressorTests.swift | ScrollSuppressor | Physical 3/4-finger click dispatch, double-click window scheduling, pass-through guards (no multitouch, app interaction, menu bar, unconfigured slot) |
+| ShortcutHotKeyGuardTests.swift | ShortcutHotKeyGuard | Recorder writes + pre-existing stored shortcuts never remain active Carbon hotkeys after guard install |
 | ShortcutEmitterTests.swift | ShortcutEmitter | Lookup + send delegation, explicit modifier/key sequencing, unbound slot returns false |
-| PermissionCoordinatorTests.swift (hotkey guard suite) | ShortcutHotKeyGuard | Recorder writes + pre-existing stored shortcuts never remain active Carbon hotkeys after guard install |
 | ShortcutRegistryTests.swift | ShortcutRegistry / SystemGestureManager | Name format `"gesture.\(rawValue)"` consistency; vertical Dock-key suppression only when all enabled vertical gestures are suppressed |

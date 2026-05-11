@@ -34,6 +34,12 @@
 		AA0101020203 /* ShortcutRegistryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0301020203 /* ShortcutRegistryTests.swift */; };
 		AA0101020204 /* ShortcutEmitterTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0301020204 /* ShortcutEmitterTests.swift */; };
 		AA0101020205 /* PermissionCoordinatorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0301020205 /* PermissionCoordinatorTests.swift */; };
+		AA0101020206 /* TestSupport.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0301020206 /* TestSupport.swift */; };
+		AA0101020207 /* AppStateTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0301020207 /* AppStateTests.swift */; };
+		AA0101020208 /* AppDelegateTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0301020208 /* AppDelegateTests.swift */; };
+		AA0101020209 /* LaunchAtLoginManagerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0301020209 /* LaunchAtLoginManagerTests.swift */; };
+		AA010102020A /* ScrollSuppressorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA030102020A /* ScrollSuppressorTests.swift */; };
+		AA010102020B /* ShortcutHotKeyGuardTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA030102020B /* ShortcutHotKeyGuardTests.swift */; };
 		AA0101030302 /* KeyboardShortcuts in Frameworks */ = {isa = PBXBuildFile; productRef = AA0701030302 /* KeyboardShortcuts */; };
 		AA0101030303 /* KeyboardShortcuts in Frameworks */ = {isa = PBXBuildFile; productRef = AA0701030303 /* KeyboardShortcuts */; };
 /* End PBXBuildFile section */
@@ -69,6 +75,12 @@
 		AA0301020203 /* ShortcutRegistryTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShortcutRegistryTests.swift; sourceTree = "<group>"; };
 		AA0301020204 /* ShortcutEmitterTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShortcutEmitterTests.swift; sourceTree = "<group>"; };
 		AA0301020205 /* PermissionCoordinatorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PermissionCoordinatorTests.swift; sourceTree = "<group>"; };
+		AA0301020206 /* TestSupport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TestSupport.swift; sourceTree = "<group>"; };
+		AA0301020207 /* AppStateTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppStateTests.swift; sourceTree = "<group>"; };
+		AA0301020208 /* AppDelegateTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppDelegateTests.swift; sourceTree = "<group>"; };
+		AA0301020209 /* LaunchAtLoginManagerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LaunchAtLoginManagerTests.swift; sourceTree = "<group>"; };
+		AA030102020A /* ScrollSuppressorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScrollSuppressorTests.swift; sourceTree = "<group>"; };
+		AA030102020B /* ShortcutHotKeyGuardTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShortcutHotKeyGuardTests.swift; sourceTree = "<group>"; };
 		AA0401010101 /* Padium.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Padium.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		AA0402020202 /* PadiumTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = PadiumTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
@@ -145,6 +157,12 @@
 				AA0301020203 /* ShortcutRegistryTests.swift */,
 				AA0301020204 /* ShortcutEmitterTests.swift */,
 				AA0301020205 /* PermissionCoordinatorTests.swift */,
+				AA0301020207 /* AppStateTests.swift */,
+				AA0301020208 /* AppDelegateTests.swift */,
+				AA0301020209 /* LaunchAtLoginManagerTests.swift */,
+				AA030102020A /* ScrollSuppressorTests.swift */,
+				AA030102020B /* ShortcutHotKeyGuardTests.swift */,
+				AA0301020206 /* TestSupport.swift */,
 			);
 			path = PadiumTests;
 			sourceTree = "<group>";
@@ -290,6 +308,12 @@
 				AA0101020203 /* ShortcutRegistryTests.swift in Sources */,
 				AA0101020204 /* ShortcutEmitterTests.swift in Sources */,
 				AA0101020205 /* PermissionCoordinatorTests.swift in Sources */,
+				AA0101020207 /* AppStateTests.swift in Sources */,
+				AA0101020208 /* AppDelegateTests.swift in Sources */,
+				AA0101020209 /* LaunchAtLoginManagerTests.swift in Sources */,
+				AA010102020A /* ScrollSuppressorTests.swift in Sources */,
+				AA010102020B /* ShortcutHotKeyGuardTests.swift in Sources */,
+				AA0101020206 /* TestSupport.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
