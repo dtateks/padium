@@ -34,3 +34,6 @@ Package.resolved
 .env.*
 # Added by code-review-graph
 .code-review-graph/
+
+# Claude Code session state (scheduled-task lock, cron registry, etc.)
+.claude/
