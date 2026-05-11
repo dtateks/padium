@@ -30,6 +30,7 @@
 		AA0101010122 /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0201010122 /* AppDelegate.swift */; };
 		AA0101010123 /* MultitouchState.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0201010123 /* MultitouchState.swift */; };
 		AA0101010124 /* GestureCalibration.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0201010124 /* GestureCalibration.swift */; };
+		AA0101010125 /* MiddleClickEmitter.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0201010125 /* MiddleClickEmitter.swift */; };
 		AA0101010121 /* IOKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = AA0201010121 /* IOKit.framework */; };
 		AA0101020201 /* GestureClassifierTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0301020201 /* GestureClassifierTests.swift */; };
 		AA0101020202 /* GestureEngineTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0301020202 /* GestureEngineTests.swift */; };
@@ -74,6 +75,7 @@
 		AA0201010122 /* AppDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppDelegate.swift; sourceTree = "<group>"; };
 		AA0201010123 /* MultitouchState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MultitouchState.swift; sourceTree = "<group>"; };
 		AA0201010124 /* GestureCalibration.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GestureCalibration.swift; sourceTree = "<group>"; };
+		AA0201010125 /* MiddleClickEmitter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MiddleClickEmitter.swift; sourceTree = "<group>"; };
 		AA0201010121 /* IOKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = IOKit.framework; path = System/Library/Frameworks/IOKit.framework; sourceTree = SDKROOT; };
 		AA0201010111 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		AA0301020201 /* GestureClassifierTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GestureClassifierTests.swift; sourceTree = "<group>"; };
@@ -144,6 +146,7 @@
 				AA0201010108 /* GestureEngine.swift */,
 				AA0201010109 /* ShortcutRegistry.swift */,
 				AA020101010A /* ShortcutEmitter.swift */,
+				AA0201010125 /* MiddleClickEmitter.swift */,
 				AA020101010B /* SettingsView.swift */,
 				AA020101010C /* GestureRowView.swift */,
 				AA020101010D /* PermissionCoordinator.swift */,
@@ -301,6 +304,7 @@
 				AA0101010108 /* GestureEngine.swift in Sources */,
 				AA0101010109 /* ShortcutRegistry.swift in Sources */,
 				AA010101010A /* ShortcutEmitter.swift in Sources */,
+				AA0101010125 /* MiddleClickEmitter.swift in Sources */,
 				AA010101010B /* SettingsView.swift in Sources */,
 				AA010101010C /* GestureRowView.swift in Sources */,
 				AA010101010D /* PermissionCoordinator.swift in Sources */,
