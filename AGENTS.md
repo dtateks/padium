@@ -1,6 +1,6 @@
 # Padium — Agent Memory
 
-**Updated:** 2026-05-12 00:50
+**Updated:** 2026-05-12 01:10
 **Commit:** working tree
 **Branch:** main
 
@@ -115,6 +115,7 @@ Physical click path: `ScrollSuppressor` CGEventTap detects configured 3/4-finger
 |------|----------|
 | App entry / scene setup | `Padium/PadiumApp.swift` |
 | Activation permission refresh | `Padium/PadiumApp.swift` |
+| Launch-at-login (SMAppService) | `Padium/LaunchAtLoginManager.swift` |
 | Runtime orchestration | `Padium/AppState.swift` |
 | Gesture detection pipeline | `Padium/GestureEngine.swift` → `GestureClassifier.swift` |
 | Sensitivity setting + tap calibration constants | `Padium/GestureCalibration.swift` |
