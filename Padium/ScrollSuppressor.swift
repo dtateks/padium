@@ -105,6 +105,14 @@ final class ScrollSuppressor: @unchecked Sendable, PhysicalClickCoordinating {
         self.clickScheduler = clickScheduler ?? DispatchPhysicalClickScheduler()
     }
 
+    deinit {
+        // Defensive: AppState is the canonical lifecycle owner and normally
+        // calls stop() before the suppressor is released, but if a test or
+        // future caller drops the reference without stopping, releasing the
+        // CGEventTap + runloop source here prevents a leak.
+        stop()
+    }
+
     // MARK: - Event tap
 
     fileprivate var eventTap: CFMachPort?
