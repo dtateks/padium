@@ -48,6 +48,10 @@ struct SettingsContentView: View {
                         runtimeAttentionView
                         Divider()
                     }
+                    if appState.systemGestureNotice != nil {
+                        systemGestureConflictBanner
+                        Divider()
+                    }
                     gestureConfigurationView
                 }
             }
@@ -71,16 +75,6 @@ struct SettingsContentView: View {
                 .controlSize(.small)
                 
                 Spacer()
-
-                if appState.systemGestureNotice != nil {
-                    Button("FIX SYSTEM CONFLICTS") {
-                        appState.openTrackpadSettings()
-                    }
-                    .buttonStyle(.plain)
-                    .font(.system(size: 10, weight: .bold, design: .monospaced))
-                    .foregroundStyle(.orange)
-                    .padding(.trailing, 12)
-                }
 
                 Button(appState.isPaused ? "RESUME" : "PAUSE") {
                     appState.togglePaused()
@@ -156,6 +150,52 @@ struct SettingsContentView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color(nsColor: .windowBackgroundColor))
+    }
+
+    private var systemGestureConflictBanner: some View {
+        let conflicts = appState.systemGestureSettings()
+        let conflictingPadiumSlots = appState.conflictingSlots
+
+        return VStack(alignment: .leading, spacing: 10) {
+            Text("MACOS GESTURES STILL ACTIVE")
+                .font(.system(size: 11, weight: .bold, design: .monospaced))
+                .foregroundStyle(.orange)
+
+            Text("These macOS trackpad gestures will fire alongside Padium until they're turned off in System Settings.")
+                .font(.system(size: 11))
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            VStack(alignment: .leading, spacing: 6) {
+                ForEach(conflicts) { conflict in
+                    HStack(alignment: .top, spacing: 8) {
+                        Image(systemName: "exclamationmark.triangle.fill")
+                            .foregroundStyle(.orange)
+                            .font(.caption2)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(conflict.title)
+                                .font(.system(size: 12, weight: .medium))
+                            let overlap = conflict.conflictingSlots.filter(conflictingPadiumSlots.contains)
+                            if !overlap.isEmpty {
+                                Text("Overlaps Padium: \(overlap.map(\.displayName).joined(separator: ", "))")
+                                    .font(.system(size: 11))
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                    }
+                }
+            }
+
+            Button("Open Trackpad Settings") {
+                appState.openTrackpadSettings()
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.small)
+            .padding(.top, 2)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(20)
+        .background(Color.orange.opacity(0.08))
     }
 
     private var runtimeAttentionView: some View {
