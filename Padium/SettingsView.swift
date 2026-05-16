@@ -16,9 +16,9 @@ struct SettingsContentView: View {
                         .font(.system(size: 10, weight: .bold, design: .monospaced))
                         .foregroundStyle(.tertiary)
                 }
-                
+
                 Spacer()
-                
+
                 if appState.runtimeStatus == .active && appState.conflictingSlots.isEmpty {
                     statusBadge(title: "ACTIVE", color: .green)
                 } else if appState.runtimeStatus == .permissionsRequired {
@@ -115,7 +115,7 @@ struct SettingsContentView: View {
             appState.refreshPermissions()
         }
     }
-    
+
     private func sensitivityReadout(for value: Double) -> String {
         let range = GestureSensitivitySetting.maximumValue - GestureSensitivitySetting.minimumValue
         guard range > 0 else { return "0%" }
@@ -139,11 +139,11 @@ struct SettingsContentView: View {
             Image(systemName: "lock.shield")
                 .font(.system(size: 48))
                 .foregroundStyle(.red.opacity(0.8))
-            
+
             Text("PERMISSIONS REQUIRED")
                 .font(.system(size: 14, weight: .bold, design: .monospaced))
                 .foregroundStyle(.primary)
-            
+
             VStack(alignment: .leading, spacing: 8) {
                 ForEach(Array(appState.missingPermissionMessages.enumerated()), id: \.offset) { _, message in
                     HStack(alignment: .top, spacing: 8) {
@@ -277,7 +277,7 @@ struct SettingsContentView: View {
             // Swipes (Left half)
             VStack(alignment: .leading, spacing: 0) {
                 headerText("SWIPES")
-                
+
                 VStack(spacing: 1) {
                     sectionHeader("3 FINGERS")
                     CompactGestureRow(slot: .threeFingerSwipeUp, appState: appState)
@@ -286,7 +286,7 @@ struct SettingsContentView: View {
                     CompactGestureRow(slot: .threeFingerSwipeRight, appState: appState)
                 }
                 .padding(.bottom, 12)
-                
+
                 VStack(spacing: 1) {
                     sectionHeader("4 FINGERS")
                     CompactGestureRow(slot: .fourFingerSwipeUp, appState: appState)
@@ -298,20 +298,20 @@ struct SettingsContentView: View {
             }
             .padding(24)
             .frame(maxWidth: .infinity, alignment: .leading)
-            
+
             Divider()
-            
+
             // Taps (Right half)
             VStack(alignment: .leading, spacing: 0) {
                 headerText("TAPS & CLICKS")
-                
+
                 VStack(spacing: 1) {
                     sectionHeader("1 & 2 FINGERS")
                     CompactGestureRow(slot: .oneFingerDoubleTap, appState: appState)
                     CompactGestureRow(slot: .twoFingerDoubleTap, appState: appState)
                 }
                 .padding(.bottom, 12)
-                
+
                 VStack(spacing: 1) {
                     sectionHeader("3 FINGERS")
                     CompactGestureRow(slot: .threeFingerDoubleTap, appState: appState)
@@ -319,7 +319,7 @@ struct SettingsContentView: View {
                     CompactGestureRow(slot: .threeFingerDoubleClick, appState: appState)
                 }
                 .padding(.bottom, 12)
-                
+
                 VStack(spacing: 1) {
                     sectionHeader("4 FINGERS")
                     CompactGestureRow(slot: .fourFingerDoubleTap, appState: appState)
@@ -333,14 +333,14 @@ struct SettingsContentView: View {
         }
         .background(Color(nsColor: .windowBackgroundColor))
     }
-    
+
     private func headerText(_ text: String) -> some View {
         Text(text)
             .font(.system(size: 14, weight: .bold, design: .monospaced))
             .foregroundStyle(.primary)
             .padding(.bottom, 16)
     }
-    
+
     private func sectionHeader(_ text: String) -> some View {
         HStack {
             Text(text)
@@ -359,14 +359,14 @@ struct SettingsContentView: View {
 struct CompactGestureRow: View {
     let slot: GestureSlot
     let appState: AppState
-    
+
     var body: some View {
         HStack(spacing: 12) {
             Text(slot.displayName.uppercased())
                 .font(.system(size: 11, weight: .medium, design: .monospaced))
                 .foregroundStyle(.primary)
                 .frame(width: 90, alignment: .leading)
-            
+
             GestureRowView(
                 slot: slot,
                 isConflicting: appState.conflictingSlots.contains(slot),
