@@ -14,11 +14,31 @@ protocol GestureFeedbackPresenting: AnyObject {
 
 @MainActor
 final class GestureFeedbackHUD: GestureFeedbackPresenting {
-    private var panel: NSPanel?
-    private var hostingView: NSHostingView<GestureFeedbackView>?
-    private var hideTask: Task<Void, Never>?
+    // `nonisolated(unsafe)` so deinit (nonisolated under Swift 6 strict
+    // concurrency) can drop the panel + cancel the hide task. The panel and
+    // task are otherwise only touched from MainActor methods.
+    private nonisolated(unsafe) var panel: NSPanel?
+    private nonisolated(unsafe) var hostingView: NSHostingView<GestureFeedbackView>?
+    private nonisolated(unsafe) var hideTask: Task<Void, Never>?
 
     private static let displayDuration: Duration = .milliseconds(1100)
+
+    deinit {
+        // If the HUD is dropped while a panel is visible (rare — in production
+        // AppState holds the HUD for the app's lifetime), make sure the panel
+        // isn't left on screen and the deferred hide task can't fire against a
+        // stale weak self.
+        hideTask?.cancel()
+        // NSPanel.orderOut must run on the main thread; deinit is nonisolated
+        // under Swift 6 strict concurrency, so hop deliberately even if we are
+        // already on main.
+        let panelToHide = panel
+        if let panelToHide {
+            DispatchQueue.main.async {
+                panelToHide.orderOut(nil)
+            }
+        }
+    }
 
     func showFeedback(_ message: String) {
         let panel = ensurePanel()
