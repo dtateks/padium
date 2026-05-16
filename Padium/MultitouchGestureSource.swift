@@ -32,6 +32,16 @@ final class MultitouchGestureSource: GestureSource, @unchecked Sendable {
         (stream, continuation) = AsyncStream<[TouchPoint]>.makeStream()
     }
 
+    deinit {
+        // Defensive: GestureEngine.stop() is the canonical path that calls
+        // stopListening, but if a caller drops this source without stopping
+        // (e.g. a test replacing the runtime), the underlying bridge keeps
+        // monitoring trackpad frames. Tear it down here so the bridge's
+        // private-framework callbacks don't outlive the source.
+        monitor.stopListening()
+        activeContinuation?.finish()
+    }
+
     func startListening() throws {
         (stream, continuation) = AsyncStream<[TouchPoint]>.makeStream()
         processingQueue.sync {
