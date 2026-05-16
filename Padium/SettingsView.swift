@@ -63,7 +63,7 @@ struct SettingsContentView: View {
                 Text("SENSITIVITY")
                     .font(.system(size: 10, weight: .bold, design: .monospaced))
                     .foregroundStyle(.secondary)
-                
+
                 Slider(
                     value: Binding(
                         get: { appState.gestureSensitivity },
@@ -73,7 +73,13 @@ struct SettingsContentView: View {
                 )
                 .frame(width: 120)
                 .controlSize(.small)
-                
+
+                Text(sensitivityReadout(for: appState.gestureSensitivity))
+                    .font(.system(size: 10, weight: .bold, design: .monospaced))
+                    .foregroundStyle(.secondary)
+                    .monospacedDigit()
+                    .frame(width: 36, alignment: .leading)
+
                 Spacer()
 
                 Button(appState.isGestureFeedbackEnabled ? "FEEDBACK ON" : "FEEDBACK OFF") {
@@ -110,6 +116,14 @@ struct SettingsContentView: View {
         }
     }
     
+    private func sensitivityReadout(for value: Double) -> String {
+        let range = GestureSensitivitySetting.maximumValue - GestureSensitivitySetting.minimumValue
+        guard range > 0 else { return "0%" }
+        let clamped = min(max(value, GestureSensitivitySetting.minimumValue), GestureSensitivitySetting.maximumValue)
+        let normalized = (clamped - GestureSensitivitySetting.minimumValue) / range
+        return "\(Int(round(normalized * 100)))%"
+    }
+
     private func statusBadge(title: String, color: Color) -> some View {
         Text(title)
             .font(.system(size: 10, weight: .bold, design: .monospaced))
