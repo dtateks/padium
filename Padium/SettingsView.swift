@@ -76,6 +76,15 @@ struct SettingsContentView: View {
                 
                 Spacer()
 
+                Button(appState.isGestureFeedbackEnabled ? "FEEDBACK ON" : "FEEDBACK OFF") {
+                    appState.toggleGestureFeedback()
+                }
+                .buttonStyle(.plain)
+                .font(.system(size: 10, weight: .bold, design: .monospaced))
+                .foregroundStyle(appState.isGestureFeedbackEnabled ? Color.accentColor : Color.secondary)
+                .padding(.trailing, 12)
+                .help("Briefly show which gesture and shortcut fired.")
+
                 Button(appState.isPaused ? "RESUME" : "PAUSE") {
                     appState.togglePaused()
                 }

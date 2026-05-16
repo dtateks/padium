@@ -386,3 +386,12 @@ final class RecordingMiddleClickEmitter: MiddleClickEmitting {
         return true
     }
 }
+
+@MainActor
+final class RecordingGestureFeedbackPresenter: GestureFeedbackPresenting {
+    private(set) var messages: [String] = []
+
+    func showFeedback(_ message: String) {
+        messages.append(message)
+    }
+}

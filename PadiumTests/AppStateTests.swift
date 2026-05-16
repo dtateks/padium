@@ -15,7 +15,8 @@ struct AppStateTests {
         runtime: RecordingGestureRuntime = RecordingGestureRuntime(),
         emitter: any ShortcutEmitting = RecordingShortcutEmitter(),
         middleClickEmitter: RecordingMiddleClickEmitter = RecordingMiddleClickEmitter(),
-        scrollSuppressor: (any PhysicalClickCoordinating)? = RecordingPhysicalClickCoordinator()
+        scrollSuppressor: (any PhysicalClickCoordinating)? = RecordingPhysicalClickCoordinator(),
+        gestureFeedbackPresenter: (any GestureFeedbackPresenting)? = nil
     ) -> AppState {
         AppState(
             permissionChecker: checker,
@@ -24,7 +25,8 @@ struct AppStateTests {
             gestureEngine: runtime,
             shortcutEmitter: emitter,
             middleClickEmitter: middleClickEmitter,
-            scrollSuppressor: scrollSuppressor
+            scrollSuppressor: scrollSuppressor,
+            gestureFeedbackPresenter: gestureFeedbackPresenter
         )
     }
 
@@ -816,12 +818,178 @@ struct AppStateTests {
         _ = preservedConfig
         _ = pausedState
     }
+
+    // MARK: - Gesture feedback HUD
+
+    @Test @MainActor func gestureFeedbackIsOffByDefault() {
+        let preservedConfig = GestureConfigurationPreserver()
+        let hudState = GestureFeedbackDefaultPreserver()
+        let state = makeState(checker: MockPermissionChecker())
+        #expect(state.isGestureFeedbackEnabled == false)
+        _ = preservedConfig
+        _ = hudState
+    }
+
+    @Test @MainActor func toggleGestureFeedbackPersists() {
+        let preservedConfig = GestureConfigurationPreserver()
+        let hudState = GestureFeedbackDefaultPreserver()
+        let stateA = makeState(checker: MockPermissionChecker())
+        stateA.setGestureFeedbackEnabled(true)
+        #expect(stateA.isGestureFeedbackEnabled == true)
+
+        let stateB = makeState(checker: MockPermissionChecker())
+        #expect(stateB.isGestureFeedbackEnabled == true)
+        _ = preservedConfig
+        _ = hudState
+    }
+
+    @Test @MainActor func gestureFeedbackShownWhenEnabledAndEmissionSucceeds() async {
+        let preservedConfig = GestureConfigurationPreserver()
+        let hudState = GestureFeedbackDefaultPreserver()
+        clearAllShortcutBindings()
+        defer { clearAllShortcutBindings() }
+        KeyboardShortcuts.setShortcut(
+            KeyboardShortcuts.Shortcut(.f13, modifiers: []),
+            for: ShortcutRegistry.name(for: .threeFingerSwipeLeft)
+        )
+
+        let checker = MockPermissionChecker(accessibility: true)
+        let runtime = RecordingGestureRuntime()
+        let presenter = RecordingGestureFeedbackPresenter()
+        let state = makeState(
+            checker: checker,
+            runtime: runtime,
+            gestureFeedbackPresenter: presenter
+        )
+        state.setGestureFeedbackEnabled(true)
+
+        state.refreshPermissions()
+        await pumpEventLoop()
+        runtime.yield(.threeFingerSwipeLeft)
+        await pumpEventLoop()
+
+        #expect(presenter.messages.count == 1)
+        #expect(presenter.messages.first?.contains("3-finger swipe left") == true)
+        _ = preservedConfig
+        _ = hudState
+    }
+
+    @Test @MainActor func gestureFeedbackSilentWhenDisabled() async {
+        let preservedConfig = GestureConfigurationPreserver()
+        let hudState = GestureFeedbackDefaultPreserver()
+        clearAllShortcutBindings()
+        defer { clearAllShortcutBindings() }
+        KeyboardShortcuts.setShortcut(
+            KeyboardShortcuts.Shortcut(.f13, modifiers: []),
+            for: ShortcutRegistry.name(for: .threeFingerSwipeLeft)
+        )
+
+        let checker = MockPermissionChecker(accessibility: true)
+        let runtime = RecordingGestureRuntime()
+        let presenter = RecordingGestureFeedbackPresenter()
+        let state = makeState(
+            checker: checker,
+            runtime: runtime,
+            gestureFeedbackPresenter: presenter
+        )
+
+        state.refreshPermissions()
+        await pumpEventLoop()
+        runtime.yield(.threeFingerSwipeLeft)
+        await pumpEventLoop()
+
+        #expect(presenter.messages.isEmpty)
+        _ = preservedConfig
+        _ = hudState
+    }
+
+    @Test @MainActor func gestureFeedbackSilentWhenEmissionMissesShortcut() async {
+        let preservedConfig = GestureConfigurationPreserver()
+        let hudState = GestureFeedbackDefaultPreserver()
+        clearAllShortcutBindings()
+        defer { clearAllShortcutBindings() }
+
+        let checker = MockPermissionChecker(accessibility: true)
+        let runtime = RecordingGestureRuntime()
+        let presenter = RecordingGestureFeedbackPresenter()
+        let emitter = RecordingUserDefaultsShortcutEmitter()
+        let state = makeState(
+            checker: checker,
+            runtime: runtime,
+            emitter: emitter,
+            gestureFeedbackPresenter: presenter
+        )
+        state.setGestureFeedbackEnabled(true)
+
+        state.refreshPermissions()
+        await pumpEventLoop()
+        runtime.yield(.threeFingerSwipeLeft)
+        await pumpEventLoop()
+
+        #expect(presenter.messages.isEmpty)
+        _ = preservedConfig
+        _ = hudState
+    }
+
+    @Test @MainActor func gestureFeedbackFormatRendersMiddleClick() {
+        let preservedConfig = GestureConfigurationPreserver()
+        let hudState = GestureFeedbackDefaultPreserver()
+        let formatted = GestureFeedbackMessage.format(slot: .threeFingerClick, action: .middleClick)
+        #expect(formatted == "3-finger click → Middle Click")
+        _ = preservedConfig
+        _ = hudState
+    }
+
+    @Test @MainActor func gestureFeedbackFormatRendersShortcutDescription() {
+        let preservedConfig = GestureConfigurationPreserver()
+        let hudState = GestureFeedbackDefaultPreserver()
+        clearAllShortcutBindings()
+        defer { clearAllShortcutBindings() }
+        KeyboardShortcuts.setShortcut(
+            KeyboardShortcuts.Shortcut(.f13, modifiers: [.command, .shift]),
+            for: ShortcutRegistry.name(for: .threeFingerSwipeLeft)
+        )
+
+        let formatted = GestureFeedbackMessage.format(slot: .threeFingerSwipeLeft, action: .shortcut)
+        #expect(formatted.hasPrefix("3-finger swipe left → "))
+        #expect(formatted != "3-finger swipe left → —")
+        _ = preservedConfig
+        _ = hudState
+    }
+
+    @Test @MainActor func gestureFeedbackFormatHandlesMissingShortcut() {
+        let preservedConfig = GestureConfigurationPreserver()
+        let hudState = GestureFeedbackDefaultPreserver()
+        clearAllShortcutBindings()
+        defer { clearAllShortcutBindings() }
+
+        let formatted = GestureFeedbackMessage.format(slot: .threeFingerSwipeLeft, action: .shortcut)
+        #expect(formatted == "3-finger swipe left → —")
+        _ = preservedConfig
+        _ = hudState
+    }
 }
 
 /// Captures the persisted pause flag so individual tests can toggle it
 /// without leaking state across the suite.
 final class PausedDefaultPreserver {
     private static let key = "runtime.isPaused"
+    private let snapshot: Bool
+
+    init() {
+        snapshot = UserDefaults.standard.bool(forKey: Self.key)
+        UserDefaults.standard.removeObject(forKey: Self.key)
+        UserDefaults.standard.synchronize()
+    }
+
+    deinit {
+        UserDefaults.standard.set(snapshot, forKey: Self.key)
+        UserDefaults.standard.synchronize()
+    }
+}
+
+final class GestureFeedbackDefaultPreserver {
+    private static let key = "hud.gestureFeedback.enabled"
     private let snapshot: Bool
 
     init() {

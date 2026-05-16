@@ -79,8 +79,10 @@ final class AppState {
     var gestureSensitivity: Double
     var isSettingsPresented: Bool = false
     private(set) var isPaused: Bool
+    private(set) var isGestureFeedbackEnabled: Bool
 
     private static let isPausedDefaultsKey = "runtime.isPaused"
+    private static let gestureFeedbackEnabledKey = "hud.gestureFeedback.enabled"
 
     private let coordinator: PermissionCoordinator
     private let preemptionController: any PreemptionControlling
@@ -89,6 +91,7 @@ final class AppState {
     private let shortcutEmitter: any ShortcutEmitting
     private let middleClickEmitter: any MiddleClickEmitting
     private let scrollSuppressor: any PhysicalClickCoordinating
+    private let gestureFeedbackPresenter: any GestureFeedbackPresenting
     private var runtimeTask: Task<Void, Never>?
     private var physicalClickRuntimeActive = false
     private var isAppInteractionActive = false
@@ -105,7 +108,8 @@ final class AppState {
         gestureEngine: (any GestureRuntimeControlling)? = nil,
         shortcutEmitter: (any ShortcutEmitting)? = nil,
         middleClickEmitter: (any MiddleClickEmitting)? = nil,
-        scrollSuppressor: (any PhysicalClickCoordinating)? = nil
+        scrollSuppressor: (any PhysicalClickCoordinating)? = nil,
+        gestureFeedbackPresenter: (any GestureFeedbackPresenting)? = nil
     ) {
         self.coordinator = PermissionCoordinator(checker: permissionChecker)
 
@@ -118,6 +122,8 @@ final class AppState {
         self.supportedGestureSlots = supportedGestureSlots
         self.gestureSensitivity = initialGestureSensitivity
         self.isPaused = UserDefaults.standard.bool(forKey: Self.isPausedDefaultsKey)
+        self.isGestureFeedbackEnabled = UserDefaults.standard.bool(forKey: Self.gestureFeedbackEnabledKey)
+        self.gestureFeedbackPresenter = gestureFeedbackPresenter ?? GestureFeedbackHUD()
         self.systemGestureManager = systemGestureManager ?? SystemGestureManager.shared
         self.systemGestureNotice = nil
         self.conflictingSlots = []
@@ -202,6 +208,19 @@ final class AppState {
 
     func togglePaused() {
         setPaused(!isPaused)
+    }
+
+    /// Toggle the on-screen confirmation HUD shown each time Padium emits
+    /// a gesture-driven shortcut or middle-click. Off by default; the
+    /// preference is persisted under UserDefaults.
+    func setGestureFeedbackEnabled(_ enabled: Bool) {
+        guard isGestureFeedbackEnabled != enabled else { return }
+        isGestureFeedbackEnabled = enabled
+        UserDefaults.standard.set(enabled, forKey: Self.gestureFeedbackEnabledKey)
+    }
+
+    func toggleGestureFeedback() {
+        setGestureFeedbackEnabled(!isGestureFeedbackEnabled)
     }
 
     func requestAccessibility() {
@@ -442,19 +461,25 @@ final class AppState {
             )
         }
 
+        let didEmit: Bool
         switch actionKind {
         case .shortcut:
-            let didEmit = shortcutEmitter.emitConfiguredShortcut(for: event.slot)
+            didEmit = shortcutEmitter.emitConfiguredShortcut(for: event.slot)
             if event.slot.isTapGesture {
                 PadiumLogger.gesture.notice(
                     "TAP-DIAG: shortcut emit slot=\(event.slot.rawValue, privacy: .public) success=\(didEmit)"
                 )
             }
         case .middleClick:
-            let didEmit = middleClickEmitter.emitMiddleClick()
+            didEmit = middleClickEmitter.emitMiddleClick()
             PadiumLogger.gesture.notice(
                 "TAP-DIAG: middle click emit slot=\(event.slot.rawValue, privacy: .public) success=\(didEmit)"
             )
+        }
+
+        if didEmit, isGestureFeedbackEnabled {
+            let message = GestureFeedbackMessage.format(slot: event.slot, action: actionKind)
+            gestureFeedbackPresenter.showFeedback(message)
         }
     }
 

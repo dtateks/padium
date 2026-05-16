@@ -62,7 +62,8 @@ PadiumApp (@main)
     ├─ MultitouchState — thread-safe shared seam between the touch pipeline (writes via MultitouchStateSink) and the scroll suppressor's CGEventTap (reads via shouldSuppressScroll / snapshot)
     ├─ ScrollSuppressor — CGEventTap: scroll suppression + physical 3/4-finger click coordination
     ├─ ShortcutEmitter — ShortcutRegistry lookup → CGEvent key-down/key-up post (via ShortcutEventSequence)
-    └─ MiddleClickEmitter — synthetic middle-click CGEvent post (marked via PadiumSyntheticEventMarker)
+    ├─ MiddleClickEmitter — synthetic middle-click CGEvent post (marked via PadiumSyntheticEventMarker)
+    └─ GestureFeedbackHUD — opt-in transient overlay (non-activating NSPanel) confirming which slot fired and which shortcut/action emitted
 ```
 
 ## Runtime Pipeline
@@ -132,6 +133,7 @@ Physical click path: `ScrollSuppressor` CGEventTap detects configured 3/4-finger
 | Shortcut emission | `Padium/ShortcutEmitter.swift` |
 | Pure shortcut event step sequence (modifier-aware) | `Padium/ShortcutEventSequence.swift` |
 | Middle-click emission | `Padium/MiddleClickEmitter.swift` |
+| Opt-in on-screen gesture feedback HUD | `Padium/GestureFeedbackHUD.swift` |
 | Padium-originated CGEvent marker (cross-cutting) | `Padium/PadiumSyntheticEventMarker.swift` |
 | Hot-key guard preventing KeyboardShortcuts from owning gesture chords | `Padium/ShortcutHotKeyGuard.swift` |
 | Permission logic | `Padium/PermissionCoordinator.swift` |
