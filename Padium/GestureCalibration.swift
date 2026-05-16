@@ -56,6 +56,18 @@ enum GestureSensitivitySetting {
     static func currentTapTravelThreshold(userDefaults: UserDefaults = .standard) -> Float {
         tapTravelThreshold(for: storedValue(userDefaults: userDefaults))
     }
+
+    /// Render the raw `[minimumValue, maximumValue]` setting as a "NN%"
+    /// label suitable for showing next to the Settings sensitivity slider.
+    /// Values outside the range clamp to the bounds so the label can never
+    /// show negative or >100% readings.
+    static func percentageLabel(for value: Double) -> String {
+        let range = maximumValue - minimumValue
+        guard range > 0 else { return "0%" }
+        let clamped = clamp(value)
+        let normalized = (clamped - minimumValue) / range
+        return "\(Int(round(normalized * 100)))%"
+    }
 }
 
 /// Wall-clock gates for tap and double-tap recognition. Empirically derived

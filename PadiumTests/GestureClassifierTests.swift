@@ -111,6 +111,23 @@ struct GestureClassifierTests {
         #expect(highSensitivity > lowSensitivity)
     }
 
+    @Test func percentageLabelMapsRangeEndpointsToZeroAndHundred() {
+        #expect(GestureSensitivitySetting.percentageLabel(for: GestureSensitivitySetting.minimumValue) == "0%")
+        #expect(GestureSensitivitySetting.percentageLabel(for: GestureSensitivitySetting.maximumValue) == "100%")
+    }
+
+    @Test func percentageLabelRoundsHalvesUp() {
+        let midpoint = GestureSensitivitySetting.minimumValue + (GestureSensitivitySetting.maximumValue - GestureSensitivitySetting.minimumValue) * 0.5
+        #expect(GestureSensitivitySetting.percentageLabel(for: midpoint) == "50%")
+    }
+
+    @Test func percentageLabelClampsOutOfRangeValues() {
+        let belowMin = GestureSensitivitySetting.minimumValue - 1
+        let aboveMax = GestureSensitivitySetting.maximumValue + 1
+        #expect(GestureSensitivitySetting.percentageLabel(for: belowMin) == "0%")
+        #expect(GestureSensitivitySetting.percentageLabel(for: aboveMax) == "100%")
+    }
+
     @Test func liveSensitivityUpdatesApplyWithoutRecreatingClassifier() {
         let liveThreshold = ThresholdBox(0.12)
         let classifier = GestureClassifier(swipeThresholdProvider: { liveThreshold.value })
