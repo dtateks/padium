@@ -27,7 +27,7 @@ Bundle ID: `com.padium`, version 0.1.0. LSUIElement=true (no Dock icon, no menu 
 - Launch path: requires **output access** (Accessibility + Post Event) before enabling output. Missing output access prompts and sets a terminate callback; relaunch after grant.
 - `PadiumApp` skips that launch prompt+quit path under XCTest so host-app tests can execute.
 - Missing Input Monitoring degrades runtime but does not stop touch-only gesture runtime.
-- `PadiumApp.applicationDidBecomeActive(_:)` refreshes permissions/runtime state on activation.
+- `AppDelegate.applicationDidBecomeActive(_:)` refreshes permissions/runtime state on activation.
 - After re-sign, `tccutil reset Accessibility com.padium` only if permissions are stale.
 - Input Monitoring and Post Event are requested by capability when missing.
 - App only disables macOS system trackpad gestures for Padium slots that currently have configured shortcuts; unbound slots leave the original macOS gestures enabled. `SystemGestureManager` persists a backup to UserDefaults so crash recovery can restore on next launch
@@ -118,7 +118,7 @@ Physical click path: `ScrollSuppressor` CGEventTap detects configured 3/4-finger
 |------|----------|
 | App entry / scene setup | `Padium/PadiumApp.swift` |
 | App delegate / window + frontmost-app orchestration | `Padium/AppDelegate.swift` |
-| Activation permission refresh | `Padium/PadiumApp.swift` |
+| Activation permission refresh | `Padium/AppDelegate.swift` |
 | Launch-at-login (SMAppService) | `Padium/LaunchAtLoginManager.swift` |
 | Runtime orchestration | `Padium/AppState.swift` |
 | Gesture detection pipeline | `Padium/GestureEngine.swift` → `GestureClassifier.swift` |
