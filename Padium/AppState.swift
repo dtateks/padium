@@ -98,8 +98,11 @@ final class AppState {
     private var touchRuntimeFailure: String?
     private var physicalClickRuntimeFailure: String?
     private var observedConfiguration: StoredConfiguration
-    private var defaultsObserver: NSObjectProtocol?
-    private var shortcutObserver: NSObjectProtocol?
+    // `nonisolated(unsafe)` because NotificationCenter.removeObserver is thread
+    // safe and these tokens are only read from `deinit`, which runs nonisolated
+    // under Swift 6 strict concurrency.
+    private nonisolated(unsafe) var defaultsObserver: NSObjectProtocol?
+    private nonisolated(unsafe) var shortcutObserver: NSObjectProtocol?
 
     init(
         permissionChecker: PermissionChecking = SystemPermissionChecker(),
@@ -175,6 +178,19 @@ final class AppState {
                 UserDefaults.standard.synchronize()
                 self?.refreshStoredConfigurationIfNeeded()
             }
+        }
+    }
+
+    deinit {
+        // The observer blocks capture [weak self] so they no-op after dealloc,
+        // but they stay registered with NotificationCenter forever otherwise —
+        // every replaced AppState (e.g. across tests) leaves a stale dispatch
+        // entry behind. Remove explicitly here.
+        if let defaultsObserver {
+            NotificationCenter.default.removeObserver(defaultsObserver)
+        }
+        if let shortcutObserver {
+            NotificationCenter.default.removeObserver(shortcutObserver)
         }
     }
 
