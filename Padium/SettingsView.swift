@@ -48,6 +48,10 @@ struct SettingsContentView: View {
                         runtimeAttentionView
                         Divider()
                     }
+                    if appState.isPaused {
+                        pausedBanner
+                        Divider()
+                    }
                     if appState.systemGestureNotice != nil {
                         systemGestureConflictBanner
                         Divider()
@@ -173,6 +177,35 @@ struct SettingsContentView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color(nsColor: .windowBackgroundColor))
+    }
+
+    private var pausedBanner: some View {
+        HStack(spacing: 12) {
+            Image(systemName: "pause.circle.fill")
+                .foregroundStyle(.secondary)
+                .font(.title3)
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text("PADIUM IS PAUSED")
+                    .font(.system(size: 11, weight: .bold, design: .monospaced))
+                    .foregroundStyle(.primary)
+                Text("Gestures will not fire until you resume.")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+            }
+
+            Spacer()
+
+            Button("Resume") {
+                appState.setPaused(false)
+            }
+            .buttonStyle(.borderedProminent)
+            .controlSize(.small)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, 20)
+        .padding(.vertical, 14)
+        .background(Color.secondary.opacity(0.08))
     }
 
     private var systemGestureConflictBanner: some View {
