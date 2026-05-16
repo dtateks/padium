@@ -15,14 +15,15 @@ protocol GestureFeedbackPresenting: AnyObject {
 @MainActor
 final class GestureFeedbackHUD: GestureFeedbackPresenting {
     private var panel: NSPanel?
+    private var hostingView: NSHostingView<GestureFeedbackView>?
     private var hideTask: Task<Void, Never>?
 
     private static let displayDuration: Duration = .milliseconds(1100)
 
     func showFeedback(_ message: String) {
         let panel = ensurePanel()
-        let hosting = NSHostingView(rootView: GestureFeedbackView(message: message))
-        panel.contentView = hosting
+        let hosting = ensureHostingView(in: panel)
+        hosting.rootView = GestureFeedbackView(message: message)
         let fitting = hosting.fittingSize
         panel.setContentSize(CGSize(
             width: max(fitting.width, 180),
@@ -31,6 +32,14 @@ final class GestureFeedbackHUD: GestureFeedbackPresenting {
         repositionAtBottomCenter(panel)
         panel.orderFrontRegardless()
         scheduleHide()
+    }
+
+    private func ensureHostingView(in panel: NSPanel) -> NSHostingView<GestureFeedbackView> {
+        if let hostingView { return hostingView }
+        let hosting = NSHostingView(rootView: GestureFeedbackView(message: ""))
+        panel.contentView = hosting
+        hostingView = hosting
+        return hosting
     }
 
     private func ensurePanel() -> NSPanel {
