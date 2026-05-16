@@ -171,9 +171,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     @objc private func handleSettingsWindowWillClose(_ notification: Notification) {
         setAppInteractionActive(false)
         restorePreviouslyFrontmostApplicationIfNeeded()
-        observedSettingsWindow = nil
-        NotificationCenter.default.removeObserver(self, name: NSWindow.didBecomeKeyNotification, object: notification.object)
-        NotificationCenter.default.removeObserver(self, name: NSWindow.didResignKeyNotification, object: notification.object)
-        NotificationCenter.default.removeObserver(self, name: NSWindow.willCloseNotification, object: notification.object)
+        removeSettingsWindowObservers()
     }
 }
