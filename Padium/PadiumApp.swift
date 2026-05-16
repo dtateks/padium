@@ -31,14 +31,24 @@ struct PadiumApp: App {
                 object: nil,
                 queue: .main
             ) { _ in
-                UserDefaults.standard.synchronize()
-                Self.restoreSystemGestures()
+                // queue: .main means we are already on the main thread; assume
+                // MainActor isolation so the restore runs synchronously. The
+                // app is about to exit — dispatching to a Task may not deliver
+                // before the process dies, which would leave system gestures
+                // suppressed until the next launch's restoreIfNeeded recovers.
+                MainActor.assumeIsolated {
+                    UserDefaults.standard.synchronize()
+                    SystemGestureManager.shared.restore()
+                }
             }
 
             let src = DispatchSource.makeSignalSource(signal: SIGTERM, queue: .main)
             src.setEventHandler {
-                UserDefaults.standard.synchronize()
-                Self.restoreSystemGesturesAndExit()
+                MainActor.assumeIsolated {
+                    UserDefaults.standard.synchronize()
+                    SystemGestureManager.shared.restore()
+                    NSApp.terminate(nil)
+                }
             }
             src.resume()
             signal(SIGTERM, SIG_IGN)
@@ -48,19 +58,6 @@ struct PadiumApp: App {
     }
 
     nonisolated(unsafe) private static var _sigtermSource: DispatchSourceSignal?
-
-    nonisolated private static func restoreSystemGestures() {
-        Task { @MainActor in
-            SystemGestureManager.shared.restore()
-        }
-    }
-
-    nonisolated private static func restoreSystemGesturesAndExit() {
-        Task { @MainActor in
-            SystemGestureManager.shared.restore()
-            NSApp.terminate(nil)
-        }
-    }
 
     private static var isRunningUnderTestHarness: Bool {
         ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil
