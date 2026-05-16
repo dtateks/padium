@@ -15,6 +15,7 @@ enum PadiumNotification {
 enum RuntimeStatus: Equatable, Sendable {
     case checking
     case permissionsRequired
+    case paused
     case degraded
     case active
 }
@@ -46,6 +47,9 @@ final class AppState {
         if !hasOutputAccess {
             return .permissionsRequired
         }
+        if isPaused {
+            return .paused
+        }
         if !hasInputMonitoringAccess || touchRuntimeFailure != nil || physicalClickRuntimeFailure != nil {
             return .degraded
         }
@@ -74,6 +78,9 @@ final class AppState {
     let supportedGestureSlots: [GestureSlot]
     var gestureSensitivity: Double
     var isSettingsPresented: Bool = false
+    private(set) var isPaused: Bool
+
+    private static let isPausedDefaultsKey = "runtime.isPaused"
 
     private let coordinator: PermissionCoordinator
     private let preemptionController: any PreemptionControlling
@@ -110,6 +117,7 @@ final class AppState {
         let initialConfiguredSlots = Self.configuredGestureSlots(from: supportedGestureSlots)
         self.supportedGestureSlots = supportedGestureSlots
         self.gestureSensitivity = initialGestureSensitivity
+        self.isPaused = UserDefaults.standard.bool(forKey: Self.isPausedDefaultsKey)
         self.systemGestureManager = systemGestureManager ?? SystemGestureManager.shared
         self.systemGestureNotice = nil
         self.conflictingSlots = []
@@ -168,13 +176,32 @@ final class AppState {
     func refreshPermissions() {
         coordinator.checkPermissions()
 
-        if coordinator.hasOutputAccess {
+        if coordinator.hasOutputAccess && !isPaused {
             startRuntimeIfNeeded()
         } else {
             stopRuntime()
         }
 
         refreshSystemGestureConflicts()
+    }
+
+    /// User-driven pause. While paused both runtimes are stopped, system
+    /// gestures are restored, and permission/activation refresh hooks will
+    /// not auto-start until the user resumes.
+    func setPaused(_ paused: Bool) {
+        guard isPaused != paused else { return }
+        isPaused = paused
+        UserDefaults.standard.set(paused, forKey: Self.isPausedDefaultsKey)
+
+        if paused {
+            stopRuntime()
+        } else if coordinator.hasOutputAccess {
+            startRuntimeIfNeeded()
+        }
+    }
+
+    func togglePaused() {
+        setPaused(!isPaused)
     }
 
     func requestAccessibility() {

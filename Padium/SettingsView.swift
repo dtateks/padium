@@ -23,6 +23,8 @@ struct SettingsContentView: View {
                     statusBadge(title: "ACTIVE", color: .green)
                 } else if appState.runtimeStatus == .permissionsRequired {
                     statusBadge(title: "PERMISSIONS", color: .red)
+                } else if appState.runtimeStatus == .paused {
+                    statusBadge(title: "PAUSED", color: .secondary)
                 } else if appState.runtimeStatus == .degraded {
                     statusBadge(title: "DEGRADED", color: .orange)
                 } else if appState.runtimeStatus == .checking {
@@ -79,6 +81,14 @@ struct SettingsContentView: View {
                     .foregroundStyle(.orange)
                     .padding(.trailing, 12)
                 }
+
+                Button(appState.isPaused ? "RESUME" : "PAUSE") {
+                    appState.togglePaused()
+                }
+                .buttonStyle(.plain)
+                .font(.system(size: 10, weight: .bold, design: .monospaced))
+                .foregroundStyle(appState.isPaused ? Color.accentColor : Color.secondary)
+                .padding(.trailing, 12)
 
                 Button("QUIT") {
                     NSApp.terminate(nil)

@@ -682,4 +682,156 @@ struct AppStateTests {
         #expect(terminateCallCount == 0)
         _ = preservedConfig
     }
+
+    // MARK: - Pause / resume
+
+    @Test @MainActor func setPausedStopsRunningRuntime() {
+        let preservedConfig = GestureConfigurationPreserver()
+        let pausedState = PausedDefaultPreserver()
+        let checker = MockPermissionChecker(accessibility: true)
+        let runtime = RecordingGestureRuntime()
+        let scrollSuppressor = RecordingPhysicalClickCoordinator()
+        let state = makeState(checker: checker, runtime: runtime, scrollSuppressor: scrollSuppressor)
+
+        state.refreshPermissions()
+        #expect(state.isRunning == true)
+
+        state.setPaused(true)
+
+        #expect(state.isPaused == true)
+        #expect(state.isRunning == false)
+        #expect(runtime.stopCallCount == 1)
+        #expect(state.runtimeStatus == .paused)
+        _ = preservedConfig
+        _ = pausedState
+    }
+
+    @Test @MainActor func setPausedFalseResumesRuntimeWhenPermissionsGranted() {
+        let preservedConfig = GestureConfigurationPreserver()
+        let pausedState = PausedDefaultPreserver()
+        let checker = MockPermissionChecker(accessibility: true)
+        let runtime = RecordingGestureRuntime()
+        let scrollSuppressor = RecordingPhysicalClickCoordinator()
+        let state = makeState(checker: checker, runtime: runtime, scrollSuppressor: scrollSuppressor)
+
+        state.refreshPermissions()
+        state.setPaused(true)
+        #expect(state.isRunning == false)
+
+        state.setPaused(false)
+
+        #expect(state.isPaused == false)
+        #expect(state.isRunning == true)
+        #expect(runtime.startCallCount == 2)
+        #expect(state.runtimeStatus == .active)
+        _ = preservedConfig
+        _ = pausedState
+    }
+
+    @Test @MainActor func togglePausedFlipsState() {
+        let preservedConfig = GestureConfigurationPreserver()
+        let pausedState = PausedDefaultPreserver()
+        let checker = MockPermissionChecker(accessibility: true)
+        let runtime = RecordingGestureRuntime()
+        let state = makeState(checker: checker, runtime: runtime)
+
+        state.refreshPermissions()
+        #expect(state.isPaused == false)
+
+        state.togglePaused()
+        #expect(state.isPaused == true)
+
+        state.togglePaused()
+        #expect(state.isPaused == false)
+        _ = preservedConfig
+        _ = pausedState
+    }
+
+    @Test @MainActor func pausedStatePersistsAcrossNewInstance() {
+        let preservedConfig = GestureConfigurationPreserver()
+        let pausedState = PausedDefaultPreserver()
+        let checker = MockPermissionChecker(accessibility: true)
+        let runtime = RecordingGestureRuntime()
+        let state = makeState(checker: checker, runtime: runtime)
+        state.setPaused(true)
+
+        let runtime2 = RecordingGestureRuntime()
+        let state2 = makeState(checker: MockPermissionChecker(accessibility: true), runtime: runtime2)
+
+        #expect(state2.isPaused == true)
+        state2.refreshPermissions()
+        #expect(state2.isRunning == false)
+        #expect(runtime2.startCallCount == 0)
+        _ = preservedConfig
+        _ = pausedState
+    }
+
+    @Test @MainActor func permissionsRequiredOverridesPausedInStatus() {
+        let preservedConfig = GestureConfigurationPreserver()
+        let pausedState = PausedDefaultPreserver()
+        let checker = MockPermissionChecker(accessibility: false)
+        let runtime = RecordingGestureRuntime()
+        let state = makeState(checker: checker, runtime: runtime)
+
+        state.refreshPermissions()
+        state.setPaused(true)
+
+        #expect(state.runtimeStatus == .permissionsRequired)
+        _ = preservedConfig
+        _ = pausedState
+    }
+
+    @Test @MainActor func pausedDoesNotStartRuntimeOnPermissionRefresh() {
+        let preservedConfig = GestureConfigurationPreserver()
+        let pausedState = PausedDefaultPreserver()
+        let checker = MockPermissionChecker(accessibility: false)
+        let runtime = RecordingGestureRuntime()
+        let state = makeState(checker: checker, runtime: runtime)
+        state.setPaused(true)
+
+        checker.accessibility = true
+        checker.postEvents = true
+        checker.inputMonitoring = true
+        state.refreshPermissions()
+
+        #expect(state.isRunning == false)
+        #expect(runtime.startCallCount == 0)
+        #expect(state.runtimeStatus == .paused)
+        _ = preservedConfig
+        _ = pausedState
+    }
+
+    @Test @MainActor func resumingClearsRuntimeFailureMessages() async {
+        let preservedConfig = GestureConfigurationPreserver()
+        let pausedState = PausedDefaultPreserver()
+        let checker = MockPermissionChecker(accessibility: true)
+        let runtime = RecordingGestureRuntime(startResult: false)
+        let state = makeState(checker: checker, runtime: runtime)
+
+        state.refreshPermissions()
+        #expect(state.runtimeFailureMessages.isEmpty == false)
+
+        state.setPaused(true)
+        #expect(state.runtimeFailureMessages.isEmpty)
+        _ = preservedConfig
+        _ = pausedState
+    }
+}
+
+/// Captures the persisted pause flag so individual tests can toggle it
+/// without leaking state across the suite.
+final class PausedDefaultPreserver {
+    private static let key = "runtime.isPaused"
+    private let snapshot: Bool
+
+    init() {
+        snapshot = UserDefaults.standard.bool(forKey: Self.key)
+        UserDefaults.standard.removeObject(forKey: Self.key)
+        UserDefaults.standard.synchronize()
+    }
+
+    deinit {
+        UserDefaults.standard.set(snapshot, forKey: Self.key)
+        UserDefaults.standard.synchronize()
+    }
 }

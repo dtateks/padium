@@ -3,7 +3,7 @@ import Testing
 
 @Suite("MenuBarStatusPresentation")
 struct MenuBarStatusPresentationTests {
-    private static let statuses: [RuntimeStatus] = [.checking, .permissionsRequired, .degraded, .active]
+    private static let statuses: [RuntimeStatus] = [.checking, .permissionsRequired, .paused, .degraded, .active]
 
     @Test("title is non-empty for every status")
     func titleNonEmpty() {
@@ -48,5 +48,12 @@ struct MenuBarStatusPresentationTests {
         let active = MenuBarStatusPresentation.menuBarSymbolName(for: .active)
         #expect(checking != active)
         #expect(!checking.isEmpty)
+    }
+
+    @Test("menu bar icon uses a pause glyph when paused")
+    func menuBarSymbolForPaused() {
+        #expect(MenuBarStatusPresentation.menuBarSymbolName(for: .paused) == "pause.circle")
+        #expect(MenuBarStatusPresentation.symbolName(for: .paused) == "pause.circle.fill")
+        #expect(MenuBarStatusPresentation.title(for: .paused) == "Paused")
     }
 }

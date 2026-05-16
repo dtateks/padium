@@ -21,6 +21,11 @@ struct MenuBarStatusItemContent: View {
 
             Divider()
 
+            Button(appState.isPaused ? "Resume Padium" : "Pause Padium") {
+                appState.togglePaused()
+            }
+            .keyboardShortcut("p", modifiers: [.command])
+
             Button("Settings…") {
                 openSettings()
             }
@@ -52,6 +57,7 @@ enum MenuBarStatusPresentation {
         case .active:              "Active"
         case .degraded:            "Degraded"
         case .permissionsRequired: "Permissions required"
+        case .paused:              "Paused"
         case .checking:            "Checking…"
         }
     }
@@ -61,6 +67,7 @@ enum MenuBarStatusPresentation {
         case .active:              "checkmark.circle.fill"
         case .degraded:            "exclamationmark.triangle.fill"
         case .permissionsRequired: "lock.shield.fill"
+        case .paused:              "pause.circle.fill"
         case .checking:            "hourglass"
         }
     }
@@ -70,10 +77,13 @@ enum MenuBarStatusPresentation {
         // everything is fine, switching to a louder warning glyph only when
         // user attention is required. This keeps the menu bar calm during
         // steady-state use while still surfacing degraded/permission states.
+        // Paused gets its own glyph so users can tell at a glance from the
+        // menu bar that gestures are intentionally off rather than broken.
         switch status {
         case .active:              "hand.tap.fill"
         case .degraded:            "exclamationmark.triangle.fill"
         case .permissionsRequired: "exclamationmark.shield.fill"
+        case .paused:              "pause.circle"
         case .checking:            "hand.tap"
         }
     }
