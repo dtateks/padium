@@ -643,15 +643,15 @@ struct AppStateTests {
         _ = preservedConfig
     }
 
-    @Test @MainActor func handleAppLaunchPromptsAndTerminatesWhenPermissionsMissing() async {
+    @Test @MainActor func handleAppLaunchPromptsAndSignalsAttentionWhenPermissionsMissing() async {
         let preservedConfig = GestureConfigurationPreserver()
         let checker = MockPermissionChecker(accessibility: false)
         let runtime = RecordingGestureRuntime()
         let state = makeState(checker: checker, runtime: runtime)
-        var terminateCallCount = 0
+        var attentionCallCount = 0
 
         state.handleAppLaunch {
-            terminateCallCount += 1
+            attentionCallCount += 1
         }
         await pumpEventLoop()
 
@@ -661,19 +661,61 @@ struct AppStateTests {
         #expect(checker.requestAccessibilityCallCount == 1)
         #expect(checker.requestListenEventAccessCallCount == 1)
         #expect(checker.requestPostEventAccessCallCount == 1)
-        #expect(terminateCallCount == 1)
+        #expect(attentionCallCount == 1)
         _ = preservedConfig
     }
 
-    @Test @MainActor func handleAppLaunchDoesNotPromptOrTerminateWhenPermissionsGranted() async {
+    @Test @MainActor func handleAppLaunchKeepsPollingAfterPermissionPromptSoGrantCanRecover() async {
+        let preservedConfig = GestureConfigurationPreserver()
+        let checker = MockPermissionChecker(accessibility: false)
+        let runtime = RecordingGestureRuntime()
+        let state = makeState(checker: checker, runtime: runtime)
+
+        state.handleAppLaunch { /* attention */ }
+        await pumpEventLoop()
+        #expect(state.isRunning == false)
+
+        checker.accessibility = true
+        checker.postEvents = true
+        checker.inputMonitoring = true
+        state.refreshPermissions()
+
+        #expect(state.isRunning == true)
+        #expect(runtime.startCallCount == 1)
+        _ = preservedConfig
+    }
+
+    @Test @MainActor func handleAppLaunchSignalsAttentionWhenOnlyInputMonitoringMissing() async {
+        let preservedConfig = GestureConfigurationPreserver()
+        let checker = MockPermissionChecker(
+            accessibility: true,
+            inputMonitoring: false,
+            postEvents: true
+        )
+        let runtime = RecordingGestureRuntime()
+        let state = makeState(checker: checker, runtime: runtime)
+        var attentionCallCount = 0
+
+        state.handleAppLaunch {
+            attentionCallCount += 1
+        }
+        await pumpEventLoop()
+
+        #expect(state.runtimeStatus == .degraded)
+        #expect(state.isTouchRuntimeActive == true)
+        #expect(attentionCallCount == 1)
+        _ = preservedConfig
+    }
+
+    @Test @MainActor func handleAppLaunchDoesNotPromptOrSignalAttentionWhenPermissionsGranted() async {
         let preservedConfig = GestureConfigurationPreserver()
         let checker = MockPermissionChecker(accessibility: true)
         let runtime = RecordingGestureRuntime()
         let state = makeState(checker: checker, runtime: runtime)
-        var terminateCallCount = 0
+        var attentionCallCount = 0
 
         state.handleAppLaunch {
-            terminateCallCount += 1
+            attentionCallCount += 1
         }
         await pumpEventLoop()
 
@@ -681,7 +723,7 @@ struct AppStateTests {
         #expect(state.isRunning == true)
         #expect(runtime.startCallCount == 1)
         #expect(checker.requestAccessibilityCallCount == 0)
-        #expect(terminateCallCount == 0)
+        #expect(attentionCallCount == 0)
         _ = preservedConfig
     }
 

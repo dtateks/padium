@@ -23,7 +23,13 @@ struct PadiumApp: App {
         let state = AppState()
         if !Self.isRunningUnderTestHarness {
             state.handleAppLaunch {
-                NSApp.terminate(nil)
+                // Stay running and let AppDelegate surface Settings; the
+                // menu bar entry plus the in-window permissions UI handle
+                // the recovery path without forcing a relaunch.
+                NotificationCenter.default.post(
+                    name: PadiumNotification.launchNeedsAttention,
+                    object: nil
+                )
             }
 
             NotificationCenter.default.addObserver(

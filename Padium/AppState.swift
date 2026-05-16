@@ -6,6 +6,11 @@ import os
 
 enum PadiumNotification {
     static let configurationDidChange = Notification.Name("Padium_configurationDidChange")
+    /// Posted when the launch path detects missing permissions or other
+    /// state that should force the Settings window to open even on a
+    /// background launch-at-login. AppDelegate observes this and routes
+    /// it through its showSettingsWindow path.
+    static let launchNeedsAttention = Notification.Name("Padium_launchNeedsAttention")
     // Mirrors KeyboardShortcuts' private notification name. Kept as a literal
     // string because the package does not expose it publicly; changes there
     // need a matching update here.
@@ -251,7 +256,7 @@ final class AppState {
         preemptionController.conflictingSettings(for: configuredGestureSlots())
     }
 
-    func handleAppLaunch(onMissingPermissions: @escaping @MainActor () -> Void) {
+    func handleAppLaunch(onAttentionRequired: @escaping @MainActor () -> Void) {
         // If a previous session crashed without restoring system gestures, restore now.
         systemGestureManager.restoreIfNeeded()
 
@@ -259,19 +264,27 @@ final class AppState {
         refreshPermissions()
 
         guard coordinator.hasOutputAccess else {
-            PadiumLogger.permission.notice("Required output permissions missing at launch; prompting then terminating")
+            PadiumLogger.permission.notice("Required output permissions missing at launch; prompting and surfacing settings")
             requestMissingPermissions()
-            stopPermissionPolling()
 
+            // Keep polling so the runtime auto-starts the moment the user
+            // grants in System Settings; the menu bar entry plus the
+            // permissions-required settings view give the user a path back
+            // even after the prompt is dismissed.
             Task { @MainActor in
                 await Task.yield()
-                onMissingPermissions()
+                onAttentionRequired()
             }
             return
         }
 
         if !coordinator.hasInputMonitoringAccess {
             requestMissingPermissions()
+
+            Task { @MainActor in
+                await Task.yield()
+                onAttentionRequired()
+            }
         }
     }
 
