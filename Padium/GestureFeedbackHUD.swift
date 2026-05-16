@@ -24,6 +24,11 @@ final class GestureFeedbackHUD: GestureFeedbackPresenting {
         let panel = ensurePanel()
         let hosting = ensureHostingView(in: panel)
         hosting.rootView = GestureFeedbackView(message: message)
+        // The new rootView invalidates layout; force a layout pass so
+        // fittingSize reflects the new message before we size the panel.
+        // Without this, the first emission can land at the old empty-message
+        // dimensions.
+        hosting.layoutSubtreeIfNeeded()
         let fitting = hosting.fittingSize
         panel.setContentSize(CGSize(
             width: max(fitting.width, 180),
