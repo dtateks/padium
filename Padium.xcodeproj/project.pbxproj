@@ -34,6 +34,7 @@
 		AA0101010126 /* LaunchAtLoginManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0201010126 /* LaunchAtLoginManager.swift */; };
 		AA0101010127 /* PadiumSyntheticEventMarker.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0201010127 /* PadiumSyntheticEventMarker.swift */; };
 		AA0101010128 /* ShortcutEventSequence.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0201010128 /* ShortcutEventSequence.swift */; };
+		AA0101010129 /* MenuBarStatusItem.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0201010129 /* MenuBarStatusItem.swift */; };
 		AA0101010121 /* IOKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = AA0201010121 /* IOKit.framework */; };
 		AA0101020201 /* GestureClassifierTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0301020201 /* GestureClassifierTests.swift */; };
 		AA0101020202 /* GestureEngineTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0301020202 /* GestureEngineTests.swift */; };
@@ -48,6 +49,7 @@
 		AA010102020B /* ShortcutHotKeyGuardTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA030102020B /* ShortcutHotKeyGuardTests.swift */; };
 		AA010102020C /* MultitouchGestureSourceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA030102020C /* MultitouchGestureSourceTests.swift */; };
 		AA010102020D /* MultitouchStateTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA030102020D /* MultitouchStateTests.swift */; };
+		AA010102020E /* MenuBarStatusItemTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA030102020E /* MenuBarStatusItemTests.swift */; };
 		AA0101030302 /* KeyboardShortcuts in Frameworks */ = {isa = PBXBuildFile; productRef = AA0701030302 /* KeyboardShortcuts */; };
 		AA0101030303 /* KeyboardShortcuts in Frameworks */ = {isa = PBXBuildFile; productRef = AA0701030303 /* KeyboardShortcuts */; };
 /* End PBXBuildFile section */
@@ -82,6 +84,7 @@
 		AA0201010126 /* LaunchAtLoginManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LaunchAtLoginManager.swift; sourceTree = "<group>"; };
 		AA0201010127 /* PadiumSyntheticEventMarker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PadiumSyntheticEventMarker.swift; sourceTree = "<group>"; };
 		AA0201010128 /* ShortcutEventSequence.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShortcutEventSequence.swift; sourceTree = "<group>"; };
+		AA0201010129 /* MenuBarStatusItem.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MenuBarStatusItem.swift; sourceTree = "<group>"; };
 		AA0201010121 /* IOKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = IOKit.framework; path = System/Library/Frameworks/IOKit.framework; sourceTree = SDKROOT; };
 		AA0201010111 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		AA0301020201 /* GestureClassifierTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GestureClassifierTests.swift; sourceTree = "<group>"; };
@@ -97,6 +100,7 @@
 		AA030102020B /* ShortcutHotKeyGuardTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShortcutHotKeyGuardTests.swift; sourceTree = "<group>"; };
 		AA030102020C /* MultitouchGestureSourceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MultitouchGestureSourceTests.swift; sourceTree = "<group>"; };
 		AA030102020D /* MultitouchStateTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MultitouchStateTests.swift; sourceTree = "<group>"; };
+		AA030102020E /* MenuBarStatusItemTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MenuBarStatusItemTests.swift; sourceTree = "<group>"; };
 		AA0401010101 /* Padium.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Padium.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		AA0402020202 /* PadiumTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = PadiumTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
@@ -157,6 +161,7 @@
 				AA0201010125 /* MiddleClickEmitter.swift */,
 				AA020101010B /* SettingsView.swift */,
 				AA020101010C /* GestureRowView.swift */,
+				AA0201010129 /* MenuBarStatusItem.swift */,
 				AA020101010D /* PermissionCoordinator.swift */,
 				AA020101010F /* PreemptionController.swift */,
 				AA0201010112 /* SystemGestureManager.swift */,
@@ -186,6 +191,7 @@
 				AA030102020B /* ShortcutHotKeyGuardTests.swift */,
 				AA030102020C /* MultitouchGestureSourceTests.swift */,
 				AA030102020D /* MultitouchStateTests.swift */,
+				AA030102020E /* MenuBarStatusItemTests.swift */,
 				AA0301020206 /* TestSupport.swift */,
 			);
 			path = PadiumTests;
@@ -318,6 +324,7 @@
 				AA0101010125 /* MiddleClickEmitter.swift in Sources */,
 				AA010101010B /* SettingsView.swift in Sources */,
 				AA010101010C /* GestureRowView.swift in Sources */,
+				AA0101010129 /* MenuBarStatusItem.swift in Sources */,
 				AA010101010D /* PermissionCoordinator.swift in Sources */,
 				AA010101010F /* PreemptionController.swift in Sources */,
 				AA0101010111 /* SystemGestureManager.swift in Sources */,
@@ -345,6 +352,7 @@
 				AA010102020B /* ShortcutHotKeyGuardTests.swift in Sources */,
 				AA010102020C /* MultitouchGestureSourceTests.swift in Sources */,
 				AA010102020D /* MultitouchStateTests.swift in Sources */,
+				AA010102020E /* MenuBarStatusItemTests.swift in Sources */,
 				AA0101020206 /* TestSupport.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;

@@ -49,6 +49,9 @@ Bundle ID: `com.padium`, version 0.1.0. LSUIElement=true (no Dock icon).
 ```
 PadiumApp (@main)
 ├─ Window(id: "settings") — SettingsContentView (single window, no TabView)
+├─ MenuBarExtra — MenuBarStatusItemContent (status indicator + Settings/Quit;
+│   only path back to Settings after the window is dismissed because LSUIElement
+│   hides the Dock icon and login launches are backgrounded)
 └─ AppState (@Observable, orchestration boundary)
     ├─ PermissionCoordinator — capability polling: Accessibility, Input Monitoring, Post Event
     ├─ PreemptionController — system trackpad gesture conflict policy (read-only)
@@ -118,6 +121,7 @@ Physical click path: `ScrollSuppressor` CGEventTap detects configured 3/4-finger
 | App entry / scene setup | `Padium/PadiumApp.swift` |
 | App delegate / window + frontmost-app orchestration | `Padium/AppDelegate.swift` |
 | Activation permission refresh | `Padium/PadiumApp.swift` |
+| Menu bar status item (only path back to Settings after window dismiss) | `Padium/MenuBarStatusItem.swift` |
 | Launch-at-login (SMAppService) | `Padium/LaunchAtLoginManager.swift` |
 | Runtime orchestration | `Padium/AppState.swift` |
 | Gesture detection pipeline | `Padium/GestureEngine.swift` → `GestureClassifier.swift` |

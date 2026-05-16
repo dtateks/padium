@@ -1,8 +1,10 @@
 import AppKit
 import SwiftUI
 
-private let settingsWindowSceneID = "settings"
-private let settingsWindowValue = "settings"
+enum SettingsWindow {
+    static let sceneID = "settings"
+    static let value = "settings"
+}
 
 @main
 struct PadiumApp: App {
@@ -65,7 +67,7 @@ struct PadiumApp: App {
     }
 
     var body: some Scene {
-        WindowGroup("Padium", id: settingsWindowSceneID, for: String.self) { _ in
+        WindowGroup("Padium", id: SettingsWindow.sceneID, for: String.self) { _ in
             SettingsContentView(appState: appState)
                 .background(SettingsWindowBridge(appDelegate: appDelegate))
                 .onAppear {
@@ -76,7 +78,7 @@ struct PadiumApp: App {
                     appState.isSettingsPresented = false
                 }
         } defaultValue: {
-            settingsWindowValue
+            SettingsWindow.value
         }
         .windowResizability(.contentSize)
         .commands {
@@ -84,6 +86,12 @@ struct PadiumApp: App {
             CommandGroup(replacing: .textEditing) {}
             CommandGroup(replacing: .undoRedo) {}
             CommandGroup(replacing: .pasteboard) {}
+        }
+
+        MenuBarExtra {
+            MenuBarStatusItemContent(appState: appState)
+        } label: {
+            Image(systemName: MenuBarStatusPresentation.menuBarSymbolName(for: appState.runtimeStatus))
         }
     }
 }
@@ -99,7 +107,7 @@ private struct SettingsWindowBridge: View {
             .background(SettingsWindowObserver(appDelegate: appDelegate))
             .onAppear {
                 appDelegate.showSettingsWindow = { [openWindow] in
-                    openWindow(id: settingsWindowSceneID, value: settingsWindowValue)
+                    openWindow(id: SettingsWindow.sceneID, value: SettingsWindow.value)
                     focusSettingsWindow()
                 }
             }
