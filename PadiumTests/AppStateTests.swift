@@ -803,6 +803,41 @@ struct AppStateTests {
         _ = pausedState
     }
 
+    @Test @MainActor func resumeAfterBindingWhilePausedActivatesNewSlots() async {
+        let preservedConfig = GestureConfigurationPreserver()
+        let pausedState = PausedDefaultPreserver()
+        clearAllShortcutBindings()
+        defer { clearAllShortcutBindings() }
+
+        let checker = MockPermissionChecker(accessibility: true)
+        let runtime = RecordingGestureRuntime()
+        let state = makeState(checker: checker, runtime: runtime)
+
+        state.refreshPermissions()
+        state.setPaused(true)
+        #expect(state.isRunning == false)
+
+        // Bind a new shortcut while paused; runtime stays stopped (covered by
+        // the bindingShortcutWhilePaused regression test). When the user
+        // resumes, the new binding should be live so the runtime sees the
+        // updated active slot set, not the stale empty one.
+        KeyboardShortcuts.setShortcut(
+            KeyboardShortcuts.Shortcut(.f13, modifiers: []),
+            for: ShortcutRegistry.name(for: .threeFingerSwipeLeft)
+        )
+        state.handleShortcutConfigurationChange()
+        await pumpEventLoop()
+
+        state.setPaused(false)
+        await pumpEventLoop()
+
+        #expect(state.isPaused == false)
+        #expect(state.isRunning == true)
+        #expect(runtime.activeSlotsHistory.last?.contains(.threeFingerSwipeLeft) == true)
+        _ = preservedConfig
+        _ = pausedState
+    }
+
     @Test @MainActor func bindingShortcutWhilePausedDoesNotResumeRuntime() async {
         let preservedConfig = GestureConfigurationPreserver()
         let pausedState = PausedDefaultPreserver()
