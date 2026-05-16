@@ -3,7 +3,6 @@ import SwiftUI
 
 enum SettingsWindow {
     static let sceneID = "settings"
-    static let value = "settings"
 }
 
 @main
@@ -64,7 +63,7 @@ struct PadiumApp: App {
     }
 
     var body: some Scene {
-        WindowGroup("Padium", id: SettingsWindow.sceneID, for: String.self) { _ in
+        Window("Padium", id: SettingsWindow.sceneID) {
             SettingsContentView(appState: appState)
                 .background(SettingsWindowBridge(appDelegate: appDelegate))
                 .onAppear {
@@ -74,8 +73,6 @@ struct PadiumApp: App {
                 .onDisappear {
                     appState.isSettingsPresented = false
                 }
-        } defaultValue: {
-            SettingsWindow.value
         }
         .windowResizability(.contentSize)
         .commands {
@@ -98,7 +95,7 @@ private struct SettingsWindowBridge: View {
             .background(SettingsWindowObserver(appDelegate: appDelegate))
             .onAppear {
                 appDelegate.showSettingsWindow = { [openWindow] in
-                    openWindow(id: SettingsWindow.sceneID, value: SettingsWindow.value)
+                    openWindow(id: SettingsWindow.sceneID)
                     focusSettingsWindow()
                 }
             }

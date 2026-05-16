@@ -83,8 +83,23 @@ struct AppDelegateTests {
         var openCount = 0
         delegate.showSettingsWindow = { openCount += 1 }
 
-        #expect(delegate.applicationShouldHandleReopen(NSApplication.shared, hasVisibleWindows: false) == true)
+        #expect(delegate.applicationShouldHandleReopen(NSApplication.shared, hasVisibleWindows: false) == false)
         #expect(openCount == 1)
+    }
+
+    @Test func applicationShouldHandleReopenDoesNotRequestDuplicateWindowWhenSettingsWindowExists() {
+        let delegate = AppDelegate()
+        let window = NSWindow()
+        var openCount = 0
+        var focusedWindow: NSWindow?
+        delegate.showSettingsWindow = { openCount += 1 }
+        delegate.focusSettingsWindowHandler = { focusedWindow = $0 }
+
+        delegate.observeSettingsWindow(window)
+
+        #expect(delegate.applicationShouldHandleReopen(NSApplication.shared, hasVisibleWindows: true) == false)
+        #expect(openCount == 0)
+        #expect(focusedWindow === window)
     }
 
     @Test func applicationDidBecomeActiveRequestsSettingsWindowWhenHidden() {
@@ -161,7 +176,7 @@ struct AppDelegateTests {
         delegate.showSettingsWindow = { openCount += 1 }
 
         delegate.applicationDidFinishLaunching(Notification(name: NSApplication.didFinishLaunchingNotification))
-        #expect(delegate.applicationShouldHandleReopen(NSApplication.shared, hasVisibleWindows: false) == true)
+        #expect(delegate.applicationShouldHandleReopen(NSApplication.shared, hasVisibleWindows: false) == false)
 
         #expect(launchAtLoginController.openSystemSettingsCallCount == 1)
         #expect(openCount == 1)

@@ -5,6 +5,7 @@ import SwiftUI
 class AppDelegate: NSObject, NSApplicationDelegate {
     weak var appState: AppState?
     var showSettingsWindow: (() -> Void)?
+    var focusSettingsWindowHandler: ((NSWindow) -> Void)?
     var rememberFrontmostApplicationHandler: (() -> Void)?
     var restorePreviousApplicationHandler: (() -> Void)?
     var closeStartupWindowsHandler: (() -> Void)?
@@ -51,8 +52,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             launchAtLoginController.openSystemSettings()
         }
 
-        openSettingsWindow()
-        return true
+        return openSettingsWindow() == false
     }
 
     func applicationDidBecomeActive(_ notification: Notification) {
@@ -93,9 +93,31 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         )
     }
 
-    private func openSettingsWindow() {
+    @discardableResult
+    private func openSettingsWindow() -> Bool {
         rememberFrontmostExternalApplicationIfNeeded()
-        showSettingsWindow?()
+
+        if let observedSettingsWindow {
+            focusSettingsWindow(observedSettingsWindow)
+            return true
+        }
+
+        guard let showSettingsWindow else { return false }
+        showSettingsWindow()
+        return true
+    }
+
+    private func focusSettingsWindow(_ window: NSWindow) {
+        if let focusSettingsWindowHandler {
+            focusSettingsWindowHandler(window)
+            return
+        }
+
+        NSApp.activate(ignoringOtherApps: true)
+        if window.isMiniaturized {
+            window.deminiaturize(nil)
+        }
+        window.makeKeyAndOrderFront(nil)
     }
 
     private func rememberFrontmostExternalApplicationIfNeeded() {
