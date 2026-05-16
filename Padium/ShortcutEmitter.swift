@@ -125,13 +125,13 @@ final class ShortcutEmitter: ShortcutEmitting {
     @discardableResult
     func emitConfiguredShortcut(for slot: GestureSlot) -> Bool {
         let name = ShortcutRegistry.name(for: slot)
+        let frontmostBundleIdentifier = NSWorkspace.shared.frontmostApplication?.bundleIdentifier ?? "nil"
         guard let shortcut = KeyboardShortcuts.getShortcut(for: name) else {
             PadiumLogger.shortcut.notice(
-                "TAP-DIAG: shortcut lookup missing slot=\(slot.rawValue, privacy: .public) frontmost=\(NSWorkspace.shared.frontmostApplication?.bundleIdentifier ?? "nil", privacy: .public) appActive=\(NSApp.isActive)"
+                "TAP-DIAG: shortcut lookup missing slot=\(slot.rawValue, privacy: .public) frontmost=\(frontmostBundleIdentifier, privacy: .public) appActive=\(NSApp.isActive)"
             )
             return false
         }
-        let frontmostBundleIdentifier = NSWorkspace.shared.frontmostApplication?.bundleIdentifier ?? "nil"
         PadiumLogger.shortcut.notice(
             "TAP-DIAG: shortcut lookup slot=\(slot.rawValue, privacy: .public) keyCode=\(shortcut.carbonKeyCode) modifiers=\(shortcut.carbonModifiers) frontmost=\(frontmostBundleIdentifier, privacy: .public) appActive=\(NSApp.isActive)"
         )
