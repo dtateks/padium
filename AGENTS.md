@@ -5,10 +5,14 @@
 **Branch:** main
 
 ## Project Overview
-macOS menu bar utility (Swift 5.9+, SwiftUI, Xcode). Trackpad swipe/tap/click gestures → keyboard shortcuts.
-Bundle ID: `com.padium`, version 0.1.0. LSUIElement=true (no Dock icon).
+macOS background utility (Swift 5.9+, SwiftUI, Xcode). Trackpad swipe/tap/click gestures → keyboard shortcuts.
+Bundle ID: `com.padium`, version 0.1.0. LSUIElement=true (no Dock icon, no menu bar entry).
 
-**Scope**: owner-local MVP only — do NOT add packaging, export, or distribution features. Launch-at-login is intentionally always-on for the installed app (auto-register the main app, no user-facing toggle, keep login launches backgrounded).
+**Scope**: owner-local MVP only — do NOT add packaging, export, or distribution features. Launch-at-login is intentionally always-on for the installed app (auto-register the main app, no user-facing toggle, keep login launches backgrounded). The Settings window is the only owner-facing surface — there is **no menu bar status item** (see `artifacts/rejected/menu-bar-status-item.md`); after the Settings window is dismissed the user relaunches via Spotlight/Finder to reopen it.
+
+## Project Context
+Rejected directions (do not re-propose without explicit owner ask):
+- `artifacts/rejected/menu-bar-status-item.md` — owner does not want an NSStatusItem / MenuBarExtra entry; relaunch-via-Spotlight is the accepted recovery path.
 
 ## Dependencies (SPM via Xcode)
 - `KeyboardShortcuts` 2.4.0 — shortcut recording UI + UserDefaults persistence
