@@ -213,12 +213,14 @@ final class AppState {
     func setPaused(_ paused: Bool) {
         guard isPaused != paused else { return }
         isPaused = paused
-        UserDefaults.standard.set(paused, forKey: Self.isPausedDefaultsKey)
-
         if paused {
+            UserDefaults.standard.set(true, forKey: Self.isPausedDefaultsKey)
             stopRuntime()
-        } else if coordinator.hasOutputAccess {
-            startRuntimeIfNeeded()
+        } else {
+            UserDefaults.standard.removeObject(forKey: Self.isPausedDefaultsKey)
+            if coordinator.hasOutputAccess {
+                startRuntimeIfNeeded()
+            }
         }
     }
 
@@ -232,7 +234,11 @@ final class AppState {
     func setGestureFeedbackEnabled(_ enabled: Bool) {
         guard isGestureFeedbackEnabled != enabled else { return }
         isGestureFeedbackEnabled = enabled
-        UserDefaults.standard.set(enabled, forKey: Self.gestureFeedbackEnabledKey)
+        if enabled {
+            UserDefaults.standard.set(true, forKey: Self.gestureFeedbackEnabledKey)
+        } else {
+            UserDefaults.standard.removeObject(forKey: Self.gestureFeedbackEnabledKey)
+        }
     }
 
     func toggleGestureFeedback() {
