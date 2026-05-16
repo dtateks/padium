@@ -8,11 +8,7 @@
 macOS background utility (Swift 5.9+, SwiftUI, Xcode). Trackpad swipe/tap/click gestures → keyboard shortcuts.
 Bundle ID: `com.padium`, version 0.1.0. LSUIElement=true (no Dock icon, no menu bar entry).
 
-**Scope**: owner-local MVP only — do NOT add packaging, export, or distribution features. Launch-at-login is intentionally always-on for the installed app (auto-register the main app, no user-facing toggle, keep login launches backgrounded). The Settings window is the only owner-facing surface — there is **no menu bar status item** (see `artifacts/rejected/menu-bar-status-item.md`); after the Settings window is dismissed the user relaunches via Spotlight/Finder to reopen it.
-
-## Project Context
-Rejected directions (do not re-propose without explicit owner ask):
-- `artifacts/rejected/menu-bar-status-item.md` — owner does not want an NSStatusItem / MenuBarExtra entry; relaunch-via-Spotlight is the accepted recovery path.
+**Scope**: owner-local MVP only — do NOT add packaging, export, or distribution features. Launch-at-login is intentionally always-on for the installed app (auto-register the main app, no user-facing toggle, keep login launches backgrounded). The Settings window is the only owner-facing surface — there is **no menu bar status item** (see `artifacts/rejected/0001-menu-bar-status-item.md`); after the Settings window is dismissed the user relaunches via Spotlight/Finder to reopen it.
 
 ## Dependencies (SPM via Xcode)
 - `KeyboardShortcuts` 2.4.0 — shortcut recording UI + UserDefaults persistence
@@ -179,3 +175,63 @@ Fall back to Grep/Glob/Read **only** when the graph doesn't cover what you need.
 2. Use `detect_changes` for code review.
 3. Use `get_affected_flows` to understand impact.
 4. Use `query_graph` pattern="tests_for" to check coverage.
+
+## Project Context
+
+Durable shared human-agent project memory lives under `./artifacts/`.
+
+Required:
+- `./artifacts/context/domain.md` — project glossary
+- `./artifacts/context/architecture.md` — module map, ownership, seams, data flow
+
+Optional, lazy-created only after real content exists:
+- `./artifacts/context/product.md` — durable PMF signals, primary segments, JTBD, north-star metric (strategic weight on top of `domain.md` ontology)
+- `./artifacts/context/testing.md` — repo-specific testing seams, commands, mock policy
+- `./artifacts/decisions/` — durable decisions with rationale (`INDEX.md` + atomic entries)
+- `./artifacts/gotchas/` — recurring traps (`INDEX.md` + atomic entries)
+- `./artifacts/rejected/` — refused directions (`INDEX.md` + atomic entries)
+
+Sibling, not part of this skill: `./artifacts/backlog/` stores the live feature backlog and execution state. It is owned by the product agent and is not gated by `project-context`.
+
+Missing optional paths mean “no entries yet”. BECAUSE empty memory creates false confidence and context tax, NEVER create empty folders or empty `INDEX.md` only to satisfy a trigger → INSTEAD: create them lazily at the first qualified entry.
+
+BECAUSE bulk-loading memory causes trust decay, artifacts are NOT auto-loaded. Load only files whose triggers match the task.
+
+### Hard Load Triggers
+
+- Naming, business behavior, or domain modeling → MUST read `./artifacts/context/domain.md` first.
+- Multi-module work, unfamiliar code, ownership, data flow, or refactor → MUST read `./artifacts/context/architecture.md` first.
+- Product feature scoping, prioritization of user-facing work, PMF interpretation, segment/JTBD reasoning, or product success-metric framing → MUST read `./artifacts/context/product.md` first if it exists.
+- Usability audit, UX review, or design critique on user-facing surfaces → MUST read `./artifacts/context/product.md` first if it exists.
+- Tests, behavior verification, or repo-specific test seams/commands → MUST read `./artifacts/context/testing.md` first if it exists.
+- Persistence, public APIs, module boundaries, ownership, deployment, or hard-to-reverse design → MUST read `./artifacts/decisions/INDEX.md` first if it exists, then relevant entries.
+- Hard-to-reverse product/architecture/dependency/workflow proposal → MUST scan `./artifacts/rejected/INDEX.md` first if it exists.
+- Known-trap area or prior failure pattern → MUST scan `./artifacts/gotchas/INDEX.md` first if it exists.
+- Unsure whether a decision/gotcha/rejection applies → read the relevant `INDEX.md` first if it exists; do not scan all entries.
+
+Catalog boundary: scan `INDEX.md` only. Load entry files only when their title, description, or scope directly matches the task. Multiple direct matches may be loaded; do not recursively follow links or scan sibling catalogs without another explicit trigger.
+
+BECAUSE missing required context recreates context loss, if `domain.md` or `architecture.md` is missing when its trigger fires, MUST pause and run/request `project-context setup`.
+
+### Conflict Rule
+
+1. Code wins for observable current behavior.
+2. Accepted decisions win for intended constraints; code disagreement is drift.
+3. The `## Project Context` bootloader rules win for shared-memory read/write behavior.
+4. Ambiguous conflict → leave entries intact, report the conflict, do not rewrite memory.
+
+### Planner Boundary
+
+Anything describing future intent, intended migration, task sequencing, or open questions belongs to the planner, not `./artifacts/`. `./artifacts/` stores accepted constraints agents must obey now.
+
+### Security Ban
+
+BECAUSE artifacts may enter version control, NEVER write secrets, tokens, credentials, private keys, raw logs, debug dumps, customer-identifying data, PII, or internal URLs into `./artifacts/` → INSTEAD: store durable prevention rules.
+
+If a real secret is found in an artifact, remove/redact it from the working tree, report exposure scope, and require credential rotation. Do not rewrite git history or claim rotation unless explicitly authorized and verified.
+
+### Writes Go Through The Skill
+
+BECAUSE ungated writes cause trust decay, NEVER edit `./artifacts/{context,decisions,gotchas,rejected}/` without invoking the `project-context` skill → INSTEAD: invoke the skill in the matching mode (`setup`, `update`, `add-decision`, `add-gotcha`, `add-rejected`, `audit`, or `prune`); the Write Gate is enforced there.
+
+`./artifacts/backlog/` is sibling to skill-owned memory and is owned by the product agent on user confirmation, not by this skill.
