@@ -51,10 +51,21 @@ final class PermissionCoordinator {
     private(set) var inputMonitoringState: PermissionState = .checking
     private(set) var postEventState: PermissionState = .checking
     private let checker: PermissionChecking
-    private var pollTimer: Timer?
+    // `nonisolated(unsafe)` so `deinit` (nonisolated under Swift 6 strict
+    // concurrency) can read the timer to invalidate it. Timer.invalidate is
+    // thread-safe and we always mutate this property from the main actor.
+    private nonisolated(unsafe) var pollTimer: Timer?
 
     init(checker: PermissionChecking = SystemPermissionChecker()) {
         self.checker = checker
+    }
+
+    deinit {
+        // Without invalidate(), the timer keeps firing every 2s forever. The
+        // `[weak self]` capture means each tick is a no-op after dealloc, but
+        // every replaced PermissionCoordinator (e.g. across test cases that
+        // call handleAppLaunch) leaks a live timer otherwise.
+        pollTimer?.invalidate()
     }
 
     var isFullyGranted: Bool {
