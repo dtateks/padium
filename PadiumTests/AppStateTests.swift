@@ -964,6 +964,40 @@ struct AppStateTests {
         _ = hudState
     }
 
+    @Test @MainActor func gestureFeedbackShownForMiddleClickEmission() async {
+        let preservedConfig = GestureConfigurationPreserver()
+        let hudState = GestureFeedbackDefaultPreserver()
+        clearAllShortcutBindings()
+        defer { clearAllShortcutBindings() }
+        GestureActionStore.setActionKind(.middleClick, for: .threeFingerClick)
+        defer { GestureActionStore.setActionKind(.shortcut, for: .threeFingerClick) }
+
+        let checker = MockPermissionChecker(accessibility: true)
+        let runtime = RecordingGestureRuntime()
+        let scrollSuppressor = RecordingPhysicalClickCoordinator()
+        let middleClickEmitter = RecordingMiddleClickEmitter()
+        let presenter = RecordingGestureFeedbackPresenter()
+        let state = makeState(
+            checker: checker,
+            runtime: runtime,
+            middleClickEmitter: middleClickEmitter,
+            scrollSuppressor: scrollSuppressor,
+            gestureFeedbackPresenter: presenter
+        )
+        state.setGestureFeedbackEnabled(true)
+
+        state.refreshPermissions()
+        await pumpEventLoop()
+        scrollSuppressor.emit(.threeFingerClick)
+        await pumpEventLoop()
+
+        #expect(middleClickEmitter.emitCallCount == 1)
+        #expect(presenter.messages.count == 1)
+        #expect(presenter.messages.first?.contains("Middle Click") == true)
+        _ = preservedConfig
+        _ = hudState
+    }
+
     @Test @MainActor func gestureFeedbackFormatRendersMiddleClick() {
         let preservedConfig = GestureConfigurationPreserver()
         let hudState = GestureFeedbackDefaultPreserver()
