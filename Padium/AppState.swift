@@ -296,6 +296,13 @@ final class AppState {
     }
 
     private func startRuntimeIfNeeded() {
+        // Pause guard lives here so every caller is safe — refreshPermissions,
+        // refreshStoredConfigurationIfNeeded (after slot bindings change), and
+        // setPaused(false) all funnel through this entry point. Without the
+        // guard, editing a shortcut while paused would silently re-arm the
+        // runtime and break the user's pause.
+        guard !isPaused else { return }
+
         gestureEngine.updateActiveSlots(configuredGestureSlots())
 
         startTouchRuntimeIfNeeded()

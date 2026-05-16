@@ -803,6 +803,39 @@ struct AppStateTests {
         _ = pausedState
     }
 
+    @Test @MainActor func bindingShortcutWhilePausedDoesNotResumeRuntime() async {
+        let preservedConfig = GestureConfigurationPreserver()
+        let pausedState = PausedDefaultPreserver()
+        clearAllShortcutBindings()
+        defer { clearAllShortcutBindings() }
+
+        let checker = MockPermissionChecker(accessibility: true)
+        let runtime = RecordingGestureRuntime()
+        let state = makeState(checker: checker, runtime: runtime)
+
+        state.refreshPermissions()
+        state.setPaused(true)
+        #expect(state.isRunning == false)
+        let baselineStartCount = runtime.startCallCount
+
+        // Simulate the KeyboardShortcuts Recorder writing a new binding —
+        // AppState observes the package's notification and forwards into
+        // refreshStoredConfigurationIfNeeded.
+        KeyboardShortcuts.setShortcut(
+            KeyboardShortcuts.Shortcut(.f13, modifiers: []),
+            for: ShortcutRegistry.name(for: .threeFingerSwipeLeft)
+        )
+        state.handleShortcutConfigurationChange()
+        await pumpEventLoop()
+
+        #expect(state.isRunning == false)
+        #expect(state.isPaused == true)
+        #expect(runtime.startCallCount == baselineStartCount)
+        #expect(state.runtimeStatus == .paused)
+        _ = preservedConfig
+        _ = pausedState
+    }
+
     @Test @MainActor func resumingClearsRuntimeFailureMessages() async {
         let preservedConfig = GestureConfigurationPreserver()
         let pausedState = PausedDefaultPreserver()
