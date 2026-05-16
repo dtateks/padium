@@ -23,12 +23,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             name: PadiumNotification.configurationDidChange,
             object: nil
         )
-        NotificationCenter.default.addObserver(
-            self,
-            selector: #selector(handleLaunchNeedsAttention(_:)),
-            name: PadiumNotification.launchNeedsAttention,
-            object: nil
-        )
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -164,15 +158,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc private func handleConfigurationDidChange(_ notification: Notification) {
         restorePreviouslyFrontmostApplicationIfNeeded()
-    }
-
-    @objc private func handleLaunchNeedsAttention(_ notification: Notification) {
-        // Force settings open even when launched at login so the user sees
-        // the permissions UI; otherwise the only signal would be the menu
-        // bar warning glyph, which a new user may not yet associate with
-        // Padium.
-        shouldAutoOpenSettingsWindow = true
-        openSettingsWindow()
     }
 
     @objc private func handleSettingsWindowDidBecomeKey(_ notification: Notification) {

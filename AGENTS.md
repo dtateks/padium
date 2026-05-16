@@ -24,8 +24,8 @@ Bundle ID: `com.padium`, version 0.1.0. LSUIElement=true (no Dock icon).
 - `scripts/install-hooks.sh` enables the local pre-push release fast lane by setting `git config --local core.hooksPath .githooks`, so Git runs the version-controlled hook directly from `.githooks/pre-push`
 - Builds unsigned, replaces `/Applications/Padium.app` by default (or `$PADIUM_INSTALL_DIR`) by moving the built app into place, signs once with a stable Apple Development/Mac Development identity, then opens the installed copy.
 - Stable install path + stable signing identity avoids repeated Accessibility re-grants from changing signatures.
-- Launch path: requires **output access** (Accessibility + Post Event) before enabling output. Missing output access prompts via `requestMissingPermissions()`, keeps permission polling active, and posts `PadiumNotification.launchNeedsAttention` so `AppDelegate` opens the Settings window (even on background login launches). The app stays running; once the user grants, polling auto-starts the runtime — no relaunch required.
-- `PadiumApp` skips that launch prompt+attention path under XCTest so host-app tests can execute.
+- Launch path: requires **output access** (Accessibility + Post Event) before enabling output. Missing output access prompts and sets a terminate callback; relaunch after grant.
+- `PadiumApp` skips that launch prompt+quit path under XCTest so host-app tests can execute.
 - Missing Input Monitoring degrades runtime but does not stop touch-only gesture runtime.
 - `PadiumApp.applicationDidBecomeActive(_:)` refreshes permissions/runtime state on activation.
 - After re-sign, `tccutil reset Accessibility com.padium` only if permissions are stale.
@@ -49,9 +49,6 @@ Bundle ID: `com.padium`, version 0.1.0. LSUIElement=true (no Dock icon).
 ```
 PadiumApp (@main)
 ├─ Window(id: "settings") — SettingsContentView (single window, no TabView)
-├─ MenuBarExtra — MenuBarStatusItemContent (status indicator + Settings/Quit;
-│   only path back to Settings after the window is dismissed because LSUIElement
-│   hides the Dock icon and login launches are backgrounded)
 └─ AppState (@Observable, orchestration boundary)
     ├─ PermissionCoordinator — capability polling: Accessibility, Input Monitoring, Post Event
     ├─ PreemptionController — system trackpad gesture conflict policy (read-only)
@@ -79,8 +76,8 @@ Physical click path: `ScrollSuppressor` CGEventTap detects configured 3/4-finger
 - Launch flow: `PermissionChecking`/`PermissionCoordinator` owns runtime capability checks; `permissionState`, `inputMonitoringState`, and `postEventState` are independent.
 - Output access = Accessibility + Post Event; missing either makes runtime status `.permissionsRequired`.
 - Input Monitoring gap makes runtime status `.degraded`.
-- `AppState` runtime status enum: `.checking`, `.permissionsRequired`, `.paused`, `.degraded`, `.active`. `.paused` reflects user-driven `AppState.setPaused(true)` / `togglePaused()`; the flag is persisted under UserDefaults key `runtime.isPaused` so it survives relaunch. Status precedence is `.checking` → `.permissionsRequired` → `.paused` → `.degraded` → `.active`, so a paused state still surfaces missing permissions first. `refreshPermissions()` will not auto-start the runtime while paused; the menu bar and settings footer expose the toggle.
-- XCTest launch path bypasses that prompt+attention behavior so host-app tests can execute.
+- `AppState` runtime status enum: `.checking`, `.permissionsRequired`, `.paused`, `.degraded`, `.active`. `.paused` reflects user-driven `AppState.setPaused(true)` / `togglePaused()`; the flag is persisted under UserDefaults key `runtime.isPaused` so it survives relaunch. Status precedence is `.checking` → `.permissionsRequired` → `.paused` → `.degraded` → `.active`, so a paused state still surfaces missing permissions first. `refreshPermissions()` will not auto-start the runtime while paused; the Settings footer exposes the toggle.
+- XCTest launch path bypasses that prompt+quit behavior so host-app tests can execute.
 - `GestureEngine` tracks a peak finger count per candidate and upgrades (re-anchors origin + startedAt) when a higher count appears; it never downgrades on lift transitions, so a 4-finger swipe whose lift drops through 3/2 fingers cannot misfire as a smaller-finger tap. Swipe classification is gated by a wall-clock settle window (~80 ms) ONLY when the peak is below the highest configured finger count — this is the libinput Pattern B "wait for additional fingers" semantics, sized for Padium's bounded peak. When peak equals max configured, commit happens on motion alone (no wait). Time-based via `scheduler.now`, so behavior is independent of frame timing. After emission it suppresses duplicates until a lift frame
 - `GestureClassifier` requires stable touch identifiers, dominant-axis commitment, and per-finger direction agreement; vertical swipes tolerate lateral drift while the dominant axis stays vertical
 - `GestureClassifier.stableActiveContacts` enforces a per-finger-count hand-spread gate (aspect-corrected pairwise distance): 2 fingers ≤ 0.70, 3 fingers ≤ 1.00, 4+ unchecked. Rejects two-handed palm artefacts (e.g. palms on opposite trackpad corners while typing) that slip past the majorAxis palm filter, without reducing sensitivity for single-hand gestures on any trackpad size
@@ -122,7 +119,6 @@ Physical click path: `ScrollSuppressor` CGEventTap detects configured 3/4-finger
 | App entry / scene setup | `Padium/PadiumApp.swift` |
 | App delegate / window + frontmost-app orchestration | `Padium/AppDelegate.swift` |
 | Activation permission refresh | `Padium/PadiumApp.swift` |
-| Menu bar status item (only path back to Settings after window dismiss) | `Padium/MenuBarStatusItem.swift` |
 | Launch-at-login (SMAppService) | `Padium/LaunchAtLoginManager.swift` |
 | Runtime orchestration | `Padium/AppState.swift` |
 | Gesture detection pipeline | `Padium/GestureEngine.swift` → `GestureClassifier.swift` |

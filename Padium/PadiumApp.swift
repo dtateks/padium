@@ -23,13 +23,7 @@ struct PadiumApp: App {
         let state = AppState()
         if !Self.isRunningUnderTestHarness {
             state.handleAppLaunch {
-                // Stay running and let AppDelegate surface Settings; the
-                // menu bar entry plus the in-window permissions UI handle
-                // the recovery path without forcing a relaunch.
-                NotificationCenter.default.post(
-                    name: PadiumNotification.launchNeedsAttention,
-                    object: nil
-                )
+                NSApp.terminate(nil)
             }
 
             NotificationCenter.default.addObserver(
@@ -92,12 +86,6 @@ struct PadiumApp: App {
             CommandGroup(replacing: .textEditing) {}
             CommandGroup(replacing: .undoRedo) {}
             CommandGroup(replacing: .pasteboard) {}
-        }
-
-        MenuBarExtra {
-            MenuBarStatusItemContent(appState: appState)
-        } label: {
-            Image(systemName: MenuBarStatusPresentation.menuBarSymbolName(for: appState.runtimeStatus))
         }
     }
 }
