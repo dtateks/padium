@@ -4,75 +4,142 @@ import Foundation
 @MainActor
 protocol SystemGestureManaging: AnyObject {
     var isSuppressed: Bool { get }
-    func suppress(conflictingSettings: [SystemGestureSetting], allSettings: [SystemGestureSetting])
+    func suppress(conflictingSettings: [SystemGestureSetting])
     func restore()
     func restoreIfNeeded()
 }
 
-/// Saves, disables, and restores macOS system trackpad gesture preferences.
+/// Saves, disables, and restores macOS system trackpad gesture preferences
+/// strictly for the specific (finger-count × direction) variants that the
+/// user has bound in Padium.
 ///
-/// On `suppress()`: reads current values, backs them up to UserDefaults, writes 0 to each
-/// trackpad gesture key and false to Dock gesture keys, then restarts the Dock.
-/// On `restore()`: writes back the saved values and restarts the Dock.
+/// Padium has NO mandate to silence Mission Control or App Exposé. Those
+/// are global, finger-count-agnostic Dock-domain toggles
+/// (`showMissionControlGestureEnabled`, `showAppExposeGestureEnabled`)
+/// that the user owns. If Padium disables them as a side effect of binding
+/// a 3-finger gesture, the user later switching macOS to a 4-finger
+/// Mission Control gesture will silently break because the Dock keys are
+/// still false — which is the bug we're fixing.
 ///
-/// Backup is persisted so that even after a crash the next launch can restore original settings.
+/// Scoping contract:
+///   * `suppress(conflictingSettings:)` writes `-int 0` ONLY to the
+///     trackpad-preference keys whose `conflictingSlots` include a slot
+///     the user has bound. No other trackpad key is touched. No Dock
+///     key is ever touched.
+///   * The backup tracks per-key original values incrementally — new
+///     conflicts get added on subsequent calls, vanished conflicts get
+///     restored on the same call, without bouncing unrelated keys.
+///   * Backup persists across launches so a crash mid-suppression
+///     self-heals on next launch via `restoreIfNeeded()`.
+///   * Legacy backups (pre-fix) that contain Dock-domain entries are
+///     restored opportunistically on the next suppress/restore call so
+///     the upgrade path itself fixes already-broken user settings.
 @MainActor
 final class SystemGestureManager: SystemGestureManaging {
+
+    typealias DefaultsWriter = (_ domain: String, _ key: String, _ value: String) -> Void
+    typealias DockRestarter = () -> Void
+    typealias TrackpadPrefsReader = () -> [String: Any]
 
     static let shared = SystemGestureManager()
 
     private let trackpadDomain = "com.apple.AppleMultitouchTrackpad"
     private let dockDomain = "com.apple.dock"
-    private let backupKey = "padium.systemGestureBackup"
+    private let backupKey: String
 
-    private static let trackpadKeys = [
-        "TrackpadTwoFingerDoubleTapGesture",
-        "TrackpadThreeFingerHorizSwipeGesture",
-        "TrackpadThreeFingerVertSwipeGesture",
-        "TrackpadFourFingerHorizSwipeGesture",
-        "TrackpadFourFingerVertSwipeGesture",
-    ]
+    private static let trackpadKeyPrefix = "trackpad."
+    private static let legacyDockKeyPrefix = "dock."
 
-    private static let verticalTrackpadKeys: Set<String> = [
-        "TrackpadThreeFingerVertSwipeGesture",
-        "TrackpadFourFingerVertSwipeGesture",
-    ]
-
-    private static let dockBoolKeys = [
-        "showMissionControlGestureEnabled",
-        "showAppExposeGestureEnabled",
-    ]
+    private let writer: DefaultsWriter
+    private let dockRestarter: DockRestarter
+    private let trackpadPrefsReader: TrackpadPrefsReader
 
     private(set) var isSuppressed = false
 
-    // MARK: - Public
-
-    /// Disable only the system gestures that conflict with configured Padium slots.
-    /// Saves original values first so they can be restored.
-    func suppress(conflictingSettings: [SystemGestureSetting], allSettings: [SystemGestureSetting]) {
-        let disabledPreferenceKeys = Self.disabledPreferenceKeys(for: conflictingSettings, allSettings: allSettings)
-        guard !disabledPreferenceKeys.trackpadKeys.isEmpty || !disabledPreferenceKeys.dockKeys.isEmpty else {
-            restore()
-            return
+    init(
+        backupKey: String = "padium.systemGestureBackup",
+        writer: DefaultsWriter? = nil,
+        dockRestarter: DockRestarter? = nil,
+        trackpadPrefsReader: TrackpadPrefsReader? = nil
+    ) {
+        self.backupKey = backupKey
+        self.writer = writer ?? Self.shellDefaultsWriter
+        self.dockRestarter = dockRestarter ?? Self.killDock
+        self.trackpadPrefsReader = trackpadPrefsReader ?? {
+            UserDefaults.standard.persistentDomain(forName: "com.apple.AppleMultitouchTrackpad") ?? [:]
         }
-
-        let backup = loadBackup() ?? captureBackup()
-        writeSuppressedValues(disabledPreferenceKeys, backup: backup)
-        restartDock()
-        isSuppressed = true
-        PadiumLogger.gesture.info("System gestures suppressed")
     }
 
-    /// Restore original system trackpad gesture settings.
+    // MARK: - Public
+
+    /// Reconcile the set of disabled trackpad-preference keys to exactly
+    /// the conflicting Padium slots. Adds newly-conflicting keys to the
+    /// suppression set and restores keys that are no longer conflicting,
+    /// all in a single defaults-write pass — no Dock restart and no
+    /// collateral writes to unrelated keys.
+    func suppress(conflictingSettings: [SystemGestureSetting]) {
+        let desiredKeys = Set(conflictingSettings.map(\.key))
+        var backup = loadBackup() ?? [:]
+        let currentlySuppressedKeys = Self.trackpadKeys(in: backup)
+
+        let toDisable = desiredKeys.subtracting(currentlySuppressedKeys)
+        let toRestore = currentlySuppressedKeys.subtracting(desiredKeys)
+
+        if !toDisable.isEmpty {
+            let trackpadPrefs = trackpadPrefsReader()
+            for key in toDisable {
+                // Default to 2 (enabled) when unset so a future restore
+                // re-enables the gesture instead of leaving it at 0.
+                backup[Self.trackpadKeyPrefix + key] = trackpadPrefs[key] as? Int ?? 2
+            }
+            for key in toDisable {
+                writer(trackpadDomain, key, "-int 0")
+            }
+        }
+
+        for key in toRestore {
+            let compositeKey = Self.trackpadKeyPrefix + key
+            let originalValue = backup[compositeKey] as? Int ?? 2
+            writer(trackpadDomain, key, "-int \(originalValue)")
+            backup.removeValue(forKey: compositeKey)
+        }
+
+        let dockRestartNeeded = restoreLegacyDockEntries(in: &backup)
+
+        persist(backup: backup)
+
+        if dockRestartNeeded {
+            dockRestarter()
+        }
+
+        PadiumLogger.gesture.info(
+            "System gestures suppressed: keys=\(desiredKeys.sorted(), privacy: .public) suppressed=\(self.isSuppressed)"
+        )
+    }
+
+    /// Restore every key that Padium currently has stored as suppressed,
+    /// including any legacy Dock-domain entries from a pre-fix backup.
     func restore() {
         guard let backup = loadBackup() else {
             isSuppressed = false
             return
         }
-        writeRestoredValues(backup)
+        var didRestartDock = false
+        for (compositeKey, value) in backup {
+            if compositeKey.hasPrefix(Self.trackpadKeyPrefix), let intValue = value as? Int {
+                let key = String(compositeKey.dropFirst(Self.trackpadKeyPrefix.count))
+                writer(trackpadDomain, key, "-int \(intValue)")
+            } else if compositeKey.hasPrefix(Self.legacyDockKeyPrefix), let boolValue = value as? Bool {
+                let key = String(compositeKey.dropFirst(Self.legacyDockKeyPrefix.count))
+                writer(dockDomain, key, "-bool \(boolValue ? "true" : "false")")
+                didRestartDock = true
+            }
+        }
         clearBackup()
-        restartDock()
         isSuppressed = false
+        if didRestartDock {
+            dockRestarter()
+        }
         PadiumLogger.gesture.info("System gestures restored")
     }
 
@@ -83,23 +150,13 @@ final class SystemGestureManager: SystemGestureManaging {
         restore()
     }
 
-    // MARK: - Backup persistence
+    // MARK: - Backup helpers
 
-    private func captureBackup() -> [String: Any] {
-        var backup: [String: Any] = [:]
-
-        let trackpadPrefs = UserDefaults.standard.persistentDomain(forName: trackpadDomain) ?? [:]
-        for key in Self.trackpadKeys {
-            backup["trackpad.\(key)"] = trackpadPrefs[key] as? Int ?? 0
-        }
-
-        let dockPrefs = UserDefaults.standard.persistentDomain(forName: dockDomain) ?? [:]
-        for key in Self.dockBoolKeys {
-            backup["dock.\(key)"] = dockPrefs[key] as? Bool ?? true
-        }
-
-        UserDefaults.standard.set(backup, forKey: backupKey)
-        return backup
+    private static func trackpadKeys(in backup: [String: Any]) -> Set<String> {
+        Set(backup.keys.compactMap { compositeKey in
+            guard compositeKey.hasPrefix(trackpadKeyPrefix) else { return nil }
+            return String(compositeKey.dropFirst(trackpadKeyPrefix.count))
+        })
     }
 
     private func loadBackup() -> [String: Any]? {
@@ -110,43 +167,38 @@ final class SystemGestureManager: SystemGestureManaging {
         UserDefaults.standard.removeObject(forKey: backupKey)
     }
 
-    // MARK: - Write preferences
-
-    private func writeSuppressedValues(
-        _ disabledPreferenceKeys: (trackpadKeys: Set<String>, dockKeys: Set<String>),
-        backup: [String: Any]
-    ) {
-        for key in Self.trackpadKeys {
-            let value = disabledPreferenceKeys.trackpadKeys.contains(key)
-                ? "-int 0"
-                : "-int \(backup["trackpad.\(key)"] as? Int ?? 0)"
-            shellDefaults(write: trackpadDomain, key: key, value: value)
-        }
-
-        for key in Self.dockBoolKeys {
-            let value = disabledPreferenceKeys.dockKeys.contains(key)
-                ? "-bool false"
-                : "-bool \((backup["dock.\(key)"] as? Bool ?? true) ? "true" : "false")"
-            shellDefaults(write: dockDomain, key: key, value: value)
+    private func persist(backup: [String: Any]) {
+        if backup.isEmpty {
+            clearBackup()
+            isSuppressed = false
+        } else {
+            UserDefaults.standard.set(backup, forKey: backupKey)
+            isSuppressed = true
         }
     }
 
-    private func writeRestoredValues(_ backup: [String: Any]) {
-        for key in Self.trackpadKeys {
-            let value = backup["trackpad.\(key)"] as? Int ?? 0
-            shellDefaults(write: trackpadDomain, key: key, value: "-int \(value)")
+    /// Pre-fix builds also stashed Dock-domain bool keys in the backup
+    /// (`showMissionControlGestureEnabled`, `showAppExposeGestureEnabled`).
+    /// Restore and strip them on first suppress/restore after upgrade so
+    /// an already-broken user setup self-heals without manual recovery.
+    private func restoreLegacyDockEntries(in backup: inout [String: Any]) -> Bool {
+        let dockKeys = backup.keys.filter { $0.hasPrefix(Self.legacyDockKeyPrefix) }
+        guard !dockKeys.isEmpty else { return false }
+        for compositeKey in dockKeys {
+            let key = String(compositeKey.dropFirst(Self.legacyDockKeyPrefix.count))
+            let value = backup[compositeKey] as? Bool ?? true
+            writer(dockDomain, key, "-bool \(value ? "true" : "false")")
+            backup.removeValue(forKey: compositeKey)
         }
-        for key in Self.dockBoolKeys {
-            let value = backup["dock.\(key)"] as? Bool ?? true
-            shellDefaults(write: dockDomain, key: key, value: "-bool \(value ? "true" : "false")")
-        }
+        PadiumLogger.gesture.notice("Restored legacy Dock-domain backup entries (\(dockKeys.count, privacy: .public))")
+        return true
     }
 
-    // MARK: - Shell helpers
+    // MARK: - Default shell-backed I/O
 
     /// Uses `defaults write` because `UserDefaults.setPersistentDomain` for system domains
     /// does not reliably propagate to the running Dock/WindowServer on modern macOS.
-    private func shellDefaults(write domain: String, key: String, value: String) {
+    private static let shellDefaultsWriter: DefaultsWriter = { domain, key, value in
         let task = Process()
         task.executableURL = URL(fileURLWithPath: "/usr/bin/defaults")
         task.arguments = ["write", domain, key] + value.split(separator: " ").map(String.init)
@@ -158,7 +210,7 @@ final class SystemGestureManager: SystemGestureManaging {
         }
     }
 
-    private func restartDock() {
+    private static let killDock: DockRestarter = {
         let task = Process()
         task.executableURL = URL(fileURLWithPath: "/usr/bin/killall")
         task.arguments = ["Dock"]
@@ -168,28 +220,5 @@ final class SystemGestureManager: SystemGestureManaging {
         } catch {
             PadiumLogger.gesture.error("killall Dock failed: \(String(describing: error), privacy: .public)")
         }
-    }
-
-    static func disabledPreferenceKeys(
-        for conflictingSettings: [SystemGestureSetting],
-        allSettings: [SystemGestureSetting]
-    ) -> (trackpadKeys: Set<String>, dockKeys: Set<String>) {
-        let trackpadKeys = Set(conflictingSettings.map(\.key))
-
-        // Only disable Dock gesture keys (Mission Control / App Exposé) when ALL
-        // enabled vertical system gestures are being suppressed. The Dock keys are
-        // global — they control gestures for every finger count. If only one
-        // finger-count variant is configured in Padium, leave Dock keys alone so
-        // the other variant still triggers Mission Control / App Exposé.
-        let enabledVerticalKeys = Set(
-            allSettings
-                .filter { $0.isEnabled && verticalTrackpadKeys.contains($0.key) }
-                .map(\.key)
-        )
-        let allVerticalSuppressed = !enabledVerticalKeys.isEmpty
-            && enabledVerticalKeys.isSubset(of: trackpadKeys)
-        let dockKeys = allVerticalSuppressed ? Set(Self.dockBoolKeys) : []
-
-        return (trackpadKeys, dockKeys)
     }
 }

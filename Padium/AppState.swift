@@ -419,7 +419,6 @@ final class AppState {
 
     private func applySystemGestureSuppression() {
         let configuredSlots = configuredGestureSlots()
-        let allSettings = preemptionController.currentSystemGestureSettings()
         let conflictingSettings = preemptionController.conflictingSettings(for: configuredSlots)
         guard !conflictingSettings.isEmpty else {
             if systemGestureManager.isSuppressed {
@@ -428,7 +427,7 @@ final class AppState {
             return
         }
 
-        systemGestureManager.suppress(conflictingSettings: conflictingSettings, allSettings: allSettings)
+        systemGestureManager.suppress(conflictingSettings: conflictingSettings)
     }
 
     private func configuredGestureSlots() -> Set<GestureSlot> {

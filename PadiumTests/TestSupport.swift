@@ -221,7 +221,7 @@ final class RecordingSystemGestureManager: SystemGestureManaging {
     private(set) var restoreIfNeededCallCount = 0
     var isSuppressed: Bool { !suppressedSettingKeys.isEmpty }
 
-    func suppress(conflictingSettings: [SystemGestureSetting], allSettings: [SystemGestureSetting]) {
+    func suppress(conflictingSettings: [SystemGestureSetting]) {
         suppressCallCount += 1
         suppressedSettingKeys = conflictingSettings.map(\.key).sorted()
     }
