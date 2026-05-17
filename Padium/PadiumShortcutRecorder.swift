@@ -72,6 +72,10 @@ final class PadiumRecorderField: NSSearchField, NSSearchFieldDelegate {
     /// click outside the field's bounds blurs (ends) recording — matches
     /// the library recorder's exit behaviour.
     private nonisolated(unsafe) var outsideClickMonitor: Any?
+    /// Set while `refreshStringValue()` is updating `stringValue` from
+    /// stored state so the AppKit text-change notification it can post
+    /// does not get mistaken for a user-initiated clear.
+    private var isApplyingStoredValue = false
 
     init(slot: GestureSlot, onChange: @escaping () -> Void) {
         self.slot = slot
@@ -155,6 +159,8 @@ final class PadiumRecorderField: NSSearchField, NSSearchFieldDelegate {
     }
 
     private func refreshStringValue() {
+        isApplyingStoredValue = true
+        defer { isApplyingStoredValue = false }
         let shortcut = KeyboardShortcuts.getShortcut(for: shortcutName)
         let fn = ShortcutRegistry.fnModifier(for: slot)
         if let shortcut {
@@ -167,6 +173,20 @@ final class PadiumRecorderField: NSSearchField, NSSearchFieldDelegate {
             stringValue = ""
         }
         showsCancelButton = !stringValue.isEmpty
+    }
+
+    /// Fires when the user clears the field via the search-field cancel
+    /// button (the small X). NSSearchField's built-in cancel handler
+    /// blanks `stringValue` and posts this notification — without
+    /// persisting anywhere — so we have to translate it into a real
+    /// `setShortcut(nil)` write or the deletion silently rolls back on
+    /// the next launch.
+    func controlTextDidChange(_ obj: Notification) {
+        guard !isApplyingStoredValue else { return }
+        showsCancelButton = !stringValue.isEmpty
+        if stringValue.isEmpty {
+            commit(shortcut: nil, fnModifier: false)
+        }
     }
 
     override func viewDidMoveToWindow() {
