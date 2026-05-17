@@ -43,11 +43,24 @@ struct PadiumShortcutRecorder: NSViewRepresentable {
     func updateNSView(_ nsView: PadiumRecorderField, context: Context) {
         nsView.update(slot: slot, onChange: onChange)
     }
+
+    /// Pin the SwiftUI-reported fitting size to the recorder's intrinsic
+    /// dimensions so a `LabeledContent` or HStack with available width
+    /// cannot stretch the search field beyond what its NSSearchField
+    /// content actually needs.
+    func sizeThatFits(
+        _ proposal: ProposedViewSize,
+        nsView: PadiumRecorderField,
+        context: Context
+    ) -> CGSize? {
+        CGSize(width: PadiumRecorderField.preferredWidth, height: PadiumRecorderField.preferredHeight)
+    }
 }
 
 @MainActor
 final class PadiumRecorderField: NSSearchField, NSSearchFieldDelegate {
-    private static let minimumWidth: CGFloat = 130
+    static let preferredWidth: CGFloat = 130
+    static let preferredHeight: CGFloat = 24
     /// Globe glyph shown in the field when the stored chord includes Fn.
     /// Plain unicode keeps rendering identical across macOS versions and
     /// avoids depending on SF Symbols image attachments inside a field.
@@ -80,7 +93,7 @@ final class PadiumRecorderField: NSSearchField, NSSearchFieldDelegate {
     init(slot: GestureSlot, onChange: @escaping () -> Void) {
         self.slot = slot
         self.onChange = onChange
-        super.init(frame: NSRect(x: 0, y: 0, width: Self.minimumWidth, height: 24))
+        super.init(frame: NSRect(x: 0, y: 0, width: Self.preferredWidth, height: Self.preferredHeight))
         self.delegate = self
         self.placeholderString = "Record Shortcut"
         self.alignment = .center
@@ -142,7 +155,7 @@ final class PadiumRecorderField: NSSearchField, NSSearchFieldDelegate {
 
     override var intrinsicContentSize: CGSize {
         var size = super.intrinsicContentSize
-        size.width = Self.minimumWidth
+        size.width = Self.preferredWidth
         return size
     }
 
@@ -232,7 +245,7 @@ final class PadiumRecorderField: NSSearchField, NSSearchFieldDelegate {
         guard window != nil else { return false }
         let ok = super.becomeFirstResponder()
         guard ok else { return ok }
-        placeholderString = "Press Shortcut…"
+        placeholderString = "Press Shortcut"
         showsCancelButton = !stringValue.isEmpty
         hideCaret()
         // `ShortcutHotKeyGuard` already keeps every gesture slot disabled
