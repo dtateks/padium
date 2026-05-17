@@ -53,7 +53,7 @@ struct GestureRowView: View {
 
     private var shortcutRow: some View {
         LabeledContent {
-            KeyboardShortcuts.Recorder(for: ShortcutRegistry.name(for: slot)) { _ in
+            PadiumShortcutRecorder(for: ShortcutRegistry.name(for: slot)) { _ in
                 onShortcutChange()
             }
         } label: {
@@ -72,7 +72,7 @@ struct GestureRowView: View {
                 .fixedSize()
 
                 if actionKind == .shortcut {
-                    KeyboardShortcuts.Recorder(for: ShortcutRegistry.name(for: slot)) { _ in
+                    PadiumShortcutRecorder(for: ShortcutRegistry.name(for: slot)) { _ in
                         onShortcutChange()
                     }
                 }

@@ -35,6 +35,7 @@
 		AA0101010127 /* PadiumSyntheticEventMarker.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0201010127 /* PadiumSyntheticEventMarker.swift */; };
 		AA0101010128 /* ShortcutEventSequence.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0201010128 /* ShortcutEventSequence.swift */; };
 		AA010101012A /* GestureFeedbackHUD.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA020101012A /* GestureFeedbackHUD.swift */; };
+		AA0101010130 /* PadiumShortcutRecorder.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0201010130 /* PadiumShortcutRecorder.swift */; };
 		AA0101010121 /* IOKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = AA0201010121 /* IOKit.framework */; };
 		AA0101020201 /* GestureClassifierTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0301020201 /* GestureClassifierTests.swift */; };
 		AA0101020202 /* GestureEngineTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0301020202 /* GestureEngineTests.swift */; };
@@ -84,6 +85,7 @@
 		AA0201010127 /* PadiumSyntheticEventMarker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PadiumSyntheticEventMarker.swift; sourceTree = "<group>"; };
 		AA0201010128 /* ShortcutEventSequence.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShortcutEventSequence.swift; sourceTree = "<group>"; };
 		AA020101012A /* GestureFeedbackHUD.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GestureFeedbackHUD.swift; sourceTree = "<group>"; };
+		AA0201010130 /* PadiumShortcutRecorder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PadiumShortcutRecorder.swift; sourceTree = "<group>"; };
 		AA0201010121 /* IOKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = IOKit.framework; path = System/Library/Frameworks/IOKit.framework; sourceTree = SDKROOT; };
 		AA0201010111 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		AA0301020201 /* GestureClassifierTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GestureClassifierTests.swift; sourceTree = "<group>"; };
@@ -159,6 +161,7 @@
 				AA0201010125 /* MiddleClickEmitter.swift */,
 				AA020101010B /* SettingsView.swift */,
 				AA020101010C /* GestureRowView.swift */,
+				AA0201010130 /* PadiumShortcutRecorder.swift */,
 				AA020101012A /* GestureFeedbackHUD.swift */,
 				AA020101010D /* PermissionCoordinator.swift */,
 				AA020101010F /* PreemptionController.swift */,
@@ -321,6 +324,7 @@
 				AA0101010125 /* MiddleClickEmitter.swift in Sources */,
 				AA010101010B /* SettingsView.swift in Sources */,
 				AA010101010C /* GestureRowView.swift in Sources */,
+				AA0101010130 /* PadiumShortcutRecorder.swift in Sources */,
 				AA010101012A /* GestureFeedbackHUD.swift in Sources */,
 				AA010101010D /* PermissionCoordinator.swift in Sources */,
 				AA010101010F /* PreemptionController.swift in Sources */,
