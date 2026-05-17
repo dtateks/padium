@@ -142,7 +142,11 @@ final class MockPermissionChecker: PermissionChecking, @unchecked Sendable {
 
 @MainActor
 final class NotificationCounter {
-    var count = 0
+    private(set) var count = 0
+
+    func increment() {
+        count += 1
+    }
 }
 
 @MainActor

@@ -224,7 +224,9 @@ struct AppStateTests {
             object: nil,
             queue: nil
         ) { _ in
-            notificationCounter.count += 1
+            Task { @MainActor in
+                notificationCounter.increment()
+            }
         }
         defer { NotificationCenter.default.removeObserver(observer) }
 
@@ -768,6 +770,19 @@ struct AppStateTests {
         _ = pausedState
     }
 
+    @Test @MainActor func pausedDefaultPreserverRestoresMissingKeyAsMissing() {
+        let key = "runtime.isPaused"
+        let originalValue = UserDefaults.standard.object(forKey: key)
+        defer { restoreUserDefault(originalValue, forKey: key) }
+
+        UserDefaults.standard.removeObject(forKey: key)
+        var preserver: PausedDefaultPreserver? = PausedDefaultPreserver()
+        preserver = nil
+
+        #expect(UserDefaults.standard.object(forKey: key) == nil)
+        _ = preserver
+    }
+
     @Test @MainActor func permissionsRequiredOverridesPausedInStatus() {
         let preservedConfig = GestureConfigurationPreserver()
         let pausedState = PausedDefaultPreserver()
@@ -909,6 +924,19 @@ struct AppStateTests {
         #expect(stateB.isGestureFeedbackEnabled == true)
         _ = preservedConfig
         _ = hudState
+    }
+
+    @Test @MainActor func gestureFeedbackDefaultPreserverRestoresMissingKeyAsMissing() {
+        let key = "hud.gestureFeedback.enabled"
+        let originalValue = UserDefaults.standard.object(forKey: key)
+        defer { restoreUserDefault(originalValue, forKey: key) }
+
+        UserDefaults.standard.removeObject(forKey: key)
+        var preserver: GestureFeedbackDefaultPreserver? = GestureFeedbackDefaultPreserver()
+        preserver = nil
+
+        #expect(UserDefaults.standard.object(forKey: key) == nil)
+        _ = preserver
     }
 
     @Test @MainActor func gestureFeedbackShownWhenEnabledAndEmissionSucceeds() async {
@@ -1076,32 +1104,40 @@ struct AppStateTests {
 /// without leaking state across the suite.
 final class PausedDefaultPreserver {
     private static let key = "runtime.isPaused"
-    private let snapshot: Bool
-
-    init() {
-        snapshot = UserDefaults.standard.bool(forKey: Self.key)
-        UserDefaults.standard.removeObject(forKey: Self.key)
-        UserDefaults.standard.synchronize()
-    }
-
-    deinit {
-        UserDefaults.standard.set(snapshot, forKey: Self.key)
-        UserDefaults.standard.synchronize()
-    }
+    private let preserver = BooleanUserDefaultPreserver(key: key)
 }
 
 final class GestureFeedbackDefaultPreserver {
     private static let key = "hud.gestureFeedback.enabled"
-    private let snapshot: Bool
+    private let preserver = BooleanUserDefaultPreserver(key: key)
+}
 
-    init() {
-        snapshot = UserDefaults.standard.bool(forKey: Self.key)
-        UserDefaults.standard.removeObject(forKey: Self.key)
+private final class BooleanUserDefaultPreserver {
+    private let key: String
+    private let snapshot: Bool?
+
+    init(key: String) {
+        self.key = key
+        self.snapshot = UserDefaults.standard.object(forKey: key) as? Bool
+        UserDefaults.standard.removeObject(forKey: key)
         UserDefaults.standard.synchronize()
     }
 
     deinit {
-        UserDefaults.standard.set(snapshot, forKey: Self.key)
+        if let snapshot {
+            UserDefaults.standard.set(snapshot, forKey: key)
+        } else {
+            UserDefaults.standard.removeObject(forKey: key)
+        }
         UserDefaults.standard.synchronize()
     }
+}
+
+private func restoreUserDefault(_ value: Any?, forKey key: String) {
+    if let value {
+        UserDefaults.standard.set(value, forKey: key)
+    } else {
+        UserDefaults.standard.removeObject(forKey: key)
+    }
+    UserDefaults.standard.synchronize()
 }
