@@ -24,13 +24,22 @@ struct ShortcutEventStep: Equatable, Sendable {
 /// state. Tests in `ShortcutEmitterTests` exercise this directly via
 /// `ShortcutEventSequence.steps(for:)`.
 enum ShortcutEventSequence {
-    static func steps(for shortcut: KeyboardShortcuts.Shortcut) -> [ShortcutEventStep] {
+    /// - parameter fnModifier: When true, OR `.maskSecondaryFn` into every
+    ///   emitted step's flags. Fn is a hardware-level modifier with no
+    ///   discrete keyDown the way ⌘/⌥/⌃/⇧ have, so we never insert a
+    ///   separate kVK_Function press — apps recognize Fn purely by the
+    ///   flag bit on the main key event.
+    static func steps(
+        for shortcut: KeyboardShortcuts.Shortcut,
+        fnModifier: Bool = false
+    ) -> [ShortcutEventStep] {
         let modifiers = modifierDescriptors(for: shortcut.modifiers)
-        let fullFlags = CGEventFlags(shortcut.modifiers)
+        let extraFn: CGEventFlags = fnModifier ? .maskSecondaryFn : []
+        let fullFlags = CGEventFlags(shortcut.modifiers).union(extraFn)
         let keyCode = CGKeyCode(shortcut.carbonKeyCode)
 
         var steps: [ShortcutEventStep] = []
-        var activeFlags = CGEventFlags()
+        var activeFlags = extraFn
 
         for modifier in modifiers {
             activeFlags.insert(modifier.flag)

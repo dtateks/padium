@@ -12,43 +12,52 @@ import SwiftUI
 /// daemon's CGEventTap, or even Padium's own previously-stored shortcut
 /// — is intercepted before the recorder ever sees it, and the chord
 /// "cannot be recorded". On top of that, the library blocks
-/// `isTakenBySystem` / `takenByMainMenu` chords with modal alerts.
+/// `isTakenBySystem` / `takenByMainMenu` chords with modal alerts,
+/// rejects Shift-only chords, and silently drops the Fn modifier.
 ///
 /// Padium's contract is the opposite: while a recorder is active, ALL
 /// active keyboard shortcuts (system, other apps, Padium itself) MUST be
-/// isolated so the chord lands here, and Padium MUST always be allowed to
+/// isolated so the chord lands here, EVERY chord must be recordable
+/// (including Shift-only and Fn-augmented), and Padium MUST always
 /// override conflicting bindings. So we install a head-inserted
 /// `.cghidEventTap` for the duration of capture, swallow every key event
-/// globally, build the `Shortcut` from the CGEvent ourselves, and persist
-/// it through the public `KeyboardShortcuts.setShortcut(_:for:)` API
-/// (which bypasses the library recorder's modal gates).
+/// globally, build the `Shortcut` from the CGEvent ourselves, persist it
+/// through the public `KeyboardShortcuts.setShortcut(_:for:)` API, and
+/// store the Fn bit beside it via `ShortcutRegistry.setFnModifier(_:for:)`.
 struct PadiumShortcutRecorder: NSViewRepresentable {
-    let shortcutName: KeyboardShortcuts.Name
-    let onChange: (KeyboardShortcuts.Shortcut?) -> Void
+    let slot: GestureSlot
+    let onChange: () -> Void
 
     init(
-        for name: KeyboardShortcuts.Name,
-        onChange: @escaping (KeyboardShortcuts.Shortcut?) -> Void = { _ in }
+        for slot: GestureSlot,
+        onChange: @escaping () -> Void = {}
     ) {
-        self.shortcutName = name
+        self.slot = slot
         self.onChange = onChange
     }
 
     func makeNSView(context: Context) -> PadiumRecorderField {
-        PadiumRecorderField(shortcutName: shortcutName, onChange: onChange)
+        PadiumRecorderField(slot: slot, onChange: onChange)
     }
 
     func updateNSView(_ nsView: PadiumRecorderField, context: Context) {
-        nsView.update(shortcutName: shortcutName, onChange: onChange)
+        nsView.update(slot: slot, onChange: onChange)
     }
 }
 
 @MainActor
 final class PadiumRecorderField: NSSearchField, NSSearchFieldDelegate {
     private static let minimumWidth: CGFloat = 130
+    /// Globe glyph shown in the field when the stored chord includes Fn.
+    /// Plain unicode keeps rendering identical across macOS versions and
+    /// avoids depending on SF Symbols image attachments inside a field.
+    private static let fnGlyph = "🌐 "
 
-    private(set) var shortcutName: KeyboardShortcuts.Name
-    private var onChange: (KeyboardShortcuts.Shortcut?) -> Void
+    private(set) var slot: GestureSlot
+    private var onChange: () -> Void
+    private var shortcutName: KeyboardShortcuts.Name {
+        ShortcutRegistry.name(for: slot)
+    }
 
     private var canBecomeKey = false
     private var cancelButton: NSButtonCell?
@@ -56,15 +65,16 @@ final class PadiumRecorderField: NSSearchField, NSSearchFieldDelegate {
     private nonisolated(unsafe) var windowDidResignKeyObserver: NSObjectProtocol?
     private nonisolated(unsafe) var windowDidBecomeKeyObserver: NSObjectProtocol?
 
-    // CGEventTap state — owned on the main run loop.
+    // Recording-time state — owned on the main run loop.
     private nonisolated(unsafe) var eventTap: CFMachPort?
     private nonisolated(unsafe) var runLoopSource: CFRunLoopSource?
+    /// Local NSEvent monitor that watches mouseUp while recording so a
+    /// click outside the field's bounds blurs (ends) recording — matches
+    /// the library recorder's exit behaviour.
+    private nonisolated(unsafe) var outsideClickMonitor: Any?
 
-    init(
-        shortcutName: KeyboardShortcuts.Name,
-        onChange: @escaping (KeyboardShortcuts.Shortcut?) -> Void
-    ) {
-        self.shortcutName = shortcutName
+    init(slot: GestureSlot, onChange: @escaping () -> Void) {
+        self.slot = slot
         self.onChange = onChange
         super.init(frame: NSRect(x: 0, y: 0, width: Self.minimumWidth, height: 24))
         self.delegate = self
@@ -77,6 +87,9 @@ final class PadiumRecorderField: NSSearchField, NSSearchFieldDelegate {
         self.cancelButton = (cell as? NSSearchFieldCell)?.cancelButtonCell
         refreshStringValue()
 
+        // Watch every shortcut change so re-renders elsewhere keep this
+        // field in sync. Also watch UserDefaults so the Fn flag — which
+        // lives outside the library — refreshes the rendered glyph.
         shortcutsNameChangeObserver = NotificationCenter.default.addObserver(
             forName: PadiumNotification.keyboardShortcutDidChange,
             object: nil,
@@ -115,6 +128,10 @@ final class PadiumRecorderField: NSSearchField, NSSearchFieldDelegate {
         }
         eventTap = nil
         runLoopSource = nil
+        // NSEvent.removeMonitor is documented thread-safe.
+        if let monitor = outsideClickMonitor {
+            NSEvent.removeMonitor(monitor)
+        }
     }
 
     override var canBecomeKeyView: Bool { canBecomeKey }
@@ -130,19 +147,25 @@ final class PadiumRecorderField: NSSearchField, NSSearchFieldDelegate {
         set { (cell as? NSSearchFieldCell)?.cancelButtonCell = newValue ? cancelButton : nil }
     }
 
-    func update(
-        shortcutName: KeyboardShortcuts.Name,
-        onChange: @escaping (KeyboardShortcuts.Shortcut?) -> Void
-    ) {
+    func update(slot: GestureSlot, onChange: @escaping () -> Void) {
         self.onChange = onChange
-        guard shortcutName != self.shortcutName else { return }
-        self.shortcutName = shortcutName
+        guard slot != self.slot else { return }
+        self.slot = slot
         refreshStringValue()
     }
 
     private func refreshStringValue() {
         let shortcut = KeyboardShortcuts.getShortcut(for: shortcutName)
-        stringValue = shortcut.map { "\($0)" } ?? ""
+        let fn = ShortcutRegistry.fnModifier(for: slot)
+        if let shortcut {
+            stringValue = (fn ? Self.fnGlyph : "") + "\(shortcut)"
+        } else if fn {
+            // Edge case: someone wrote the Fn flag without a chord. Show
+            // the glyph so the user sees the orphan state and can clear.
+            stringValue = Self.fnGlyph.trimmingCharacters(in: .whitespaces)
+        } else {
+            stringValue = ""
+        }
         showsCancelButton = !stringValue.isEmpty
     }
 
@@ -196,6 +219,7 @@ final class PadiumRecorderField: NSSearchField, NSSearchFieldDelegate {
         // at the Carbon level; library `isPaused` is internal so we rely
         // on the guard + the global event tap below for isolation.
         installEventTap()
+        installOutsideClickMonitor()
         return ok
     }
 
@@ -205,6 +229,7 @@ final class PadiumRecorderField: NSSearchField, NSSearchFieldDelegate {
 
     private func endRecording() {
         teardownEventTap()
+        teardownOutsideClickMonitor()
         placeholderString = "Record Shortcut"
         showsCancelButton = !stringValue.isEmpty
         restoreCaret()
@@ -218,6 +243,37 @@ final class PadiumRecorderField: NSSearchField, NSSearchFieldDelegate {
 
     private func restoreCaret() {
         (currentEditor() as? NSTextView)?.insertionPointColor = .textColor
+    }
+
+    // MARK: - Outside-click monitor
+
+    /// While recording, any mouseUp inside Padium that lands outside the
+    /// field's bounds blurs the field. Returning the event lets it
+    /// continue to its normal target so the user's click still hits the
+    /// button/control they actually intended to interact with.
+    private func installOutsideClickMonitor() {
+        guard outsideClickMonitor == nil else { return }
+        outsideClickMonitor = NSEvent.addLocalMonitorForEvents(
+            matching: [.leftMouseUp, .rightMouseUp, .otherMouseUp]
+        ) { [weak self] event in
+            guard let self else { return event }
+            let pointInWindow = event.locationInWindow
+            let pointInView = self.convert(pointInWindow, from: nil)
+            // Tiny inset so a stray click on the field's own edge doesn't
+            // immediately cancel.
+            let allowedBounds = self.bounds.insetBy(dx: -3, dy: -3)
+            if !allowedBounds.contains(pointInView) {
+                self.window?.makeFirstResponder(nil)
+            }
+            return event
+        }
+    }
+
+    private func teardownOutsideClickMonitor() {
+        if let monitor = outsideClickMonitor {
+            NSEvent.removeMonitor(monitor)
+            outsideClickMonitor = nil
+        }
     }
 
     // MARK: - CGEventTap
@@ -283,62 +339,51 @@ final class PadiumRecorderField: NSSearchField, NSSearchFieldDelegate {
         let keyCode = Int(event.getIntegerValueField(.keyboardEventKeycode))
         let nsFlags = NSEvent.ModifierFlags(rawValue: UInt(event.flags.rawValue))
             .intersection(.deviceIndependentFlagsMask)
+        let hasFn = nsFlags.contains(.function)
+        // Anything outside Fn (the only flag with no Carbon equivalent)
+        // counts as a "real" modifier presence. Used only to decide that
+        // bare Esc / Delete are UI controls vs recordable chords.
+        let nonFnModifiers = nsFlags.subtracting(.function)
 
-        // Escape with no modifiers → cancel capture, keep prior value.
-        if nsFlags.isEmpty, keyCode == kVK_Escape {
-            MainActor.assumeIsolated {
-                self.window?.makeFirstResponder(nil)
+        // Bare Esc → cancel capture, keep prior value.
+        if nonFnModifiers.isEmpty, !hasFn, keyCode == kVK_Escape {
+            DispatchQueue.main.async { [weak self] in
+                self?.window?.makeFirstResponder(nil)
             }
             return nil
         }
-
-        // Delete / Backspace with no modifiers → clear binding.
-        if nsFlags.isEmpty,
+        // Bare Delete / Backspace → clear binding (and the Fn flag).
+        if nonFnModifiers.isEmpty, !hasFn,
            keyCode == kVK_Delete || keyCode == kVK_ForwardDelete {
-            MainActor.assumeIsolated {
-                self.commit(shortcut: nil)
+            DispatchQueue.main.async { [weak self] in
+                self?.commit(shortcut: nil, fnModifier: false)
             }
             return nil
         }
 
-        // Require a non-shift modifier OR a function/F-key, matching the
-        // library's "shift alone doesn't work as a global hotkey" rule.
-        let isFunctionLikeKey = keyCode == kVK_F1 || keyCode == kVK_F2
-            || keyCode == kVK_F3 || keyCode == kVK_F4 || keyCode == kVK_F5
-            || keyCode == kVK_F6 || keyCode == kVK_F7 || keyCode == kVK_F8
-            || keyCode == kVK_F9 || keyCode == kVK_F10 || keyCode == kVK_F11
-            || keyCode == kVK_F12 || keyCode == kVK_F13 || keyCode == kVK_F14
-            || keyCode == kVK_F15 || keyCode == kVK_F16 || keyCode == kVK_F17
-            || keyCode == kVK_F18 || keyCode == kVK_F19 || keyCode == kVK_F20
-
-        let hasRealModifier = !nsFlags.subtracting([.shift, .capsLock, .function]).isEmpty
-        guard hasRealModifier || isFunctionLikeKey else {
-            // Swallow lone keys so neither the system nor the frontmost app
-            // reacts mid-recording (no surprise text input, no menu trigger).
-            return nil
-        }
-
-        // Force-build the Shortcut from carbon codes directly — Padium
-        // always overrides, no isTakenBySystem / takenByMainMenu modals.
-        let carbonModifiers = nsFlags.subtracting(.function).carbonFlags
+        // Accept everything else verbatim. Padium owns the override
+        // contract, so Shift-only, Fn+key, modifierless-key, and chords
+        // already taken by the system are all recordable.
+        let carbonModifiers = nonFnModifiers.carbonFlags
         let shortcut = KeyboardShortcuts.Shortcut(
             carbonKeyCode: keyCode,
             carbonModifiers: carbonModifiers
         )
-        MainActor.assumeIsolated {
-            self.commit(shortcut: shortcut)
+        DispatchQueue.main.async { [weak self] in
+            self?.commit(shortcut: shortcut, fnModifier: hasFn)
         }
         return nil
     }
 
-    private func commit(shortcut: KeyboardShortcuts.Shortcut?) {
+    private func commit(shortcut: KeyboardShortcuts.Shortcut?, fnModifier: Bool) {
         // Public API: persists into UserDefaults and posts
         // `shortcutByNameDidChange`. `ShortcutHotKeyGuard` then immediately
         // disables the Carbon hotkey registration so Padium never owns the
         // chord at the OS level.
         KeyboardShortcuts.setShortcut(shortcut, for: shortcutName)
+        ShortcutRegistry.setFnModifier(fnModifier, for: slot)
         refreshStringValue()
-        onChange(shortcut)
+        onChange()
         window?.makeFirstResponder(nil)
     }
 }

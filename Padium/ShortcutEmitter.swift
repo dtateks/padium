@@ -11,6 +11,16 @@ protocol ShortcutEmitting: AnyObject {
 // Exists so tests can inject a fake sender without requiring a real CGEvent session.
 protocol ShortcutSending: AnyObject {
     func send(_ shortcut: KeyboardShortcuts.Shortcut) -> Bool
+    // Padium-only: post a chord that also carries the Fn (globe) modifier.
+    // Default delegates to `send(_:)` so existing test doubles that only
+    // care about base modifiers keep working unchanged.
+    func send(_ shortcut: KeyboardShortcuts.Shortcut, fnModifier: Bool) -> Bool
+}
+
+extension ShortcutSending {
+    func send(_ shortcut: KeyboardShortcuts.Shortcut, fnModifier: Bool) -> Bool {
+        send(shortcut)
+    }
 }
 
 // Posts a CGEvent key-down + key-up pair for the given shortcut.
@@ -23,6 +33,10 @@ final class CGEventShortcutSender: ShortcutSending {
     }
 
     func send(_ shortcut: KeyboardShortcuts.Shortcut) -> Bool {
+        send(shortcut, fnModifier: false)
+    }
+
+    func send(_ shortcut: KeyboardShortcuts.Shortcut, fnModifier: Bool) -> Bool {
         let performStep: (ShortcutEventStep) -> Bool
         if let stepPerformer {
             performStep = stepPerformer
@@ -48,7 +62,7 @@ final class CGEventShortcutSender: ShortcutSending {
 
         var activeModifierKeyCodes: [CGKeyCode] = []
 
-        for step in ShortcutEventSequence.steps(for: shortcut) {
+        for step in ShortcutEventSequence.steps(for: shortcut, fnModifier: fnModifier) {
             guard performStep(step) else {
                 releaseActiveModifiers(activeModifierKeyCodes: activeModifierKeyCodes, performStep: performStep)
                 return false
@@ -132,10 +146,11 @@ final class ShortcutEmitter: ShortcutEmitting {
             )
             return false
         }
+        let fnModifier = ShortcutRegistry.fnModifier(for: slot)
         PadiumLogger.shortcut.notice(
-            "TAP-DIAG: shortcut lookup slot=\(slot.rawValue, privacy: .public) keyCode=\(shortcut.carbonKeyCode) modifiers=\(shortcut.carbonModifiers) frontmost=\(frontmostBundleIdentifier, privacy: .public) appActive=\(NSApp.isActive)"
+            "TAP-DIAG: shortcut lookup slot=\(slot.rawValue, privacy: .public) keyCode=\(shortcut.carbonKeyCode) modifiers=\(shortcut.carbonModifiers) fn=\(fnModifier) frontmost=\(frontmostBundleIdentifier, privacy: .public) appActive=\(NSApp.isActive)"
         )
-        return sender.send(shortcut)
+        return sender.send(shortcut, fnModifier: fnModifier)
     }
 }
 
